@@ -135,7 +135,7 @@ We also provide a Colab demo of this tutorial:
 
 ## Overview of Model Zoo and Datasets
 
-We support various spatiotemporal prediction methods and provide [benchmarks](https://github.com/chengtan9907/OpenSTL/tree/master/docs/en/model_zoos) on various STL datasets. We are working on add new methods and collecting experiment results.
+We support various spatiotemporal prediction methods and provide [benchmarks](https://github.com/chengtan9907/OpenSTL/tree/master/docs/en/model_zoos) on various STL datasets. We are working on adding new methods and collecting experiment results.
 
 * Spatiotemporal Prediction Methods.
 
