@@ -121,6 +121,7 @@ class WeatherBenchDataset(Dataset):
             data_names = mv_data_map[data_name]
         else:
             data_names = data_name if isinstance(data_name, list) else [data_name]
+        self.data_name = str(data_names)
 
         for name in tqdm.tqdm(data_names):
             data, mean, std = self._load_data_xarray(data_name=name, levels=levels)
