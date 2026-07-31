@@ -259,6 +259,8 @@ class PrecipitationEvaluator:
         if self.zr_a <= 0 or self.zr_b <= 0:
             raise ValueError('Frozen Z-R parameters zr_a and zr_b must be > 0')
         self.model = _MetricState(self.lead_count, len(self.thresholds))
+        self.model_unclipped = _MetricState(
+            self.lead_count, len(self.thresholds))
         self.persistence = _MetricState(self.lead_count, len(self.thresholds))
         self.model_wet = _MetricState(self.lead_count, len(self.thresholds))
         self.persistence_wet = _MetricState(
@@ -272,6 +274,22 @@ class PrecipitationEvaluator:
         self._best_cases = []
         self._worst_cases = []
         self._window_rows = []
+        self._raw_prediction_count = np.zeros(
+            self.lead_count, dtype=np.int64)
+        self._raw_prediction_below_zero = np.zeros(
+            self.lead_count, dtype=np.int64)
+        self._raw_prediction_above_one = np.zeros(
+            self.lead_count, dtype=np.int64)
+        self._raw_prediction_min = np.full(
+            self.lead_count, np.inf, dtype=np.float64)
+        self._raw_prediction_max = np.full(
+            self.lead_count, -np.inf, dtype=np.float64)
+        # A dense bounded histogram avoids retaining ~90 million validation
+        # pixels while providing stable raw-output tail quantiles.
+        self._raw_histogram_edges = np.linspace(-2.0, 3.0, 10001)
+        self._raw_histogram = np.zeros(
+            (self.lead_count, len(self._raw_histogram_edges) - 1),
+            dtype=np.int64)
         self._psd_bins = 20
         self._psd = {
             method: {
@@ -282,9 +300,10 @@ class PrecipitationEvaluator:
             for method in ('model', 'persistence')
         }
 
-    def _physical(self, values):
+    def _physical(self, values, clip=True):
         values = np.asarray(values, dtype=np.float32) * self.value_scale
-        values = np.clip(values, self.clip_range[0], self.clip_range[1])
+        if clip:
+            values = np.clip(values, self.clip_range[0], self.clip_range[1])
         if self.convert_dbz_to_rain:
             reflectivity = np.power(10.0, values / 10.0)
             return np.power(reflectivity / self.zr_a, 1.0 / self.zr_b)
@@ -302,7 +321,26 @@ class PrecipitationEvaluator:
                event_ids=None,
                sample_ids=None,
                valid_mask=None):
-        pred = self._physical(pred)
+        raw_pred = np.asarray(pred, dtype=np.float32)
+        finite_raw = np.isfinite(raw_pred)
+        for lead in range(self.lead_count):
+            values = raw_pred[:, lead][finite_raw[:, lead]]
+            if not values.size:
+                continue
+            self._raw_prediction_count[lead] += values.size
+            self._raw_prediction_below_zero[lead] += np.count_nonzero(values < 0)
+            self._raw_prediction_above_one[lead] += np.count_nonzero(values > 1)
+            self._raw_prediction_min[lead] = min(
+                self._raw_prediction_min[lead], float(values.min()))
+            self._raw_prediction_max[lead] = max(
+                self._raw_prediction_max[lead], float(values.max()))
+            clipped_for_histogram = np.clip(
+                values, self._raw_histogram_edges[0],
+                np.nextafter(self._raw_histogram_edges[-1], -np.inf))
+            self._raw_histogram[lead] += np.histogram(
+                clipped_for_histogram, bins=self._raw_histogram_edges)[0]
+        pred_unclipped = self._physical(raw_pred, clip=False)
+        pred = self._physical(raw_pred)
         if self.true_is_rain:
             true = np.clip(
                 np.asarray(true, dtype=np.float32) * 35.0, 0.0, 35.0)
@@ -327,6 +365,8 @@ class PrecipitationEvaluator:
             valid_mask = valid_mask & np.isfinite(pred) & np.isfinite(true)
 
         self.model.update(pred, true, self.thresholds, valid_mask)
+        self.model_unclipped.update(
+            pred_unclipped, true, self.thresholds, valid_mask)
         self.persistence.update(
             persistence, true, self.thresholds, valid_mask)
         wet_mask = valid_mask & (true > self.wet_threshold)
@@ -675,6 +715,7 @@ class PrecipitationEvaluator:
                 },
             },
             'model': self.model.report(self.thresholds),
+            'model_unclipped': self.model_unclipped.report(self.thresholds),
             'persistence': self.persistence.report(self.thresholds),
             'events': {
                 event_id: {
@@ -702,7 +743,59 @@ class PrecipitationEvaluator:
         report['event_macro'] = self._event_macro(report['events'])
         report['spatial_object_summary'] = self._spatial_object_summary()
         report['bootstrap_ci'] = self._bootstrap_event_delta(report['events'])
+        report['raw_prediction_range'] = self._raw_prediction_report()
         return report
+
+    def _raw_prediction_report(self):
+        def quantile(histogram, quantile):
+            total = histogram.sum()
+            if not total:
+                return np.nan
+            index = int(np.searchsorted(
+                np.cumsum(histogram), quantile * total, side='left'))
+            index = min(index, len(self._raw_histogram_edges) - 2)
+            return float((self._raw_histogram_edges[index]
+                          + self._raw_histogram_edges[index + 1]) / 2)
+
+        leads = []
+        for lead in range(self.lead_count):
+            count = self._raw_prediction_count[lead]
+            histogram = self._raw_histogram[lead]
+            leads.append({
+                'lead_index': lead + 1,
+                'lead_minutes': (lead + 1) * self.lead_minutes,
+                'count': int(count),
+                'fraction_below_zero': _safe_ratio(
+                    self._raw_prediction_below_zero[lead], count),
+                'fraction_above_one': _safe_ratio(
+                    self._raw_prediction_above_one[lead], count),
+                'q95': quantile(histogram, 0.95),
+                'q99': quantile(histogram, 0.99),
+                'q999': quantile(histogram, 0.999),
+                'min': self._raw_prediction_min[lead],
+                'max': self._raw_prediction_max[lead],
+            })
+        counts = self._raw_prediction_count.sum()
+        combined_histogram = self._raw_histogram.sum(axis=0)
+        return {
+            'histogram_range': [
+                self._raw_histogram_edges[0],
+                self._raw_histogram_edges[-1]],
+            'histogram_bins': len(self._raw_histogram_edges) - 1,
+            'overall': {
+                'count': int(counts),
+                'fraction_below_zero': _safe_ratio(
+                    self._raw_prediction_below_zero.sum(), counts),
+                'fraction_above_one': _safe_ratio(
+                    self._raw_prediction_above_one.sum(), counts),
+                'q95': quantile(combined_histogram, 0.95),
+                'q99': quantile(combined_histogram, 0.99),
+                'q999': quantile(combined_histogram, 0.999),
+                'min': np.min(self._raw_prediction_min),
+                'max': np.max(self._raw_prediction_max),
+            },
+            'per_lead': leads,
+        }
 
     def _event_macro(self, events):
         result = {}

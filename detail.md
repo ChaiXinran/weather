@@ -154,3 +154,25 @@ wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
   --no_display_method_info `
   --ckpt_path work_dirs/bth_simvp_gsta_r2d_5ep_seed0/checkpoints/best_val_csi.ckpt
 ```
+
+R3 10-epoch、3-seed 稳定性实验：
+
+```powershell
+wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
+  bash tools/run_bth_r3_multiseed.sh
+```
+
+R3 checkpoint 无重训练诊断（validation 事件级、输出范围、FSS/对象指标）：
+
+```powershell
+wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
+  env PYTHONPATH=. /home/ranye/miniconda3/envs/OpenSTL/bin/python `
+  tools/diagnose_bth_checkpoint.py `
+  --dataname bth_radar --method SimVP `
+  --config_file configs/bth_radar/SimVP_gSTA_r3.py `
+  --data_root /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S `
+  --ckpt_path work_dirs/bth_simvp_gsta_r3_direct_10ep_seed0/checkpoints/selected_csi_0.714247_epoch03.ckpt `
+  --ex_name bth_r3_epoch03_val_diagnostics --res_dir work_dirs `
+  --test --no_display_method_info --num_workers 4 `
+  --batch_size 16 --val_batch_size 8 --epoch 10 --seed 0 --deterministic
+```
