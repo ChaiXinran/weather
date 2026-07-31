@@ -51,5 +51,27 @@ def load_data(dataname, batch_size, val_batch_size, num_workers, data_root, dist
         from .dataloader_sevir import load_data
         cfg_dataloader['data_name'] = kwargs.get('data_name', 'sevir')
         return load_data(batch_size, val_batch_size, data_root, num_workers, **cfg_dataloader)
+    elif dataname == 'bth_radar':
+        from .dataloader_radar import load_data
+        cfg_dataloader.update(
+            train_date_range=kwargs.get(
+                'train_date_range', ('2025-05-01', '2025-07-31')),
+            val_date_range=kwargs.get(
+                'val_date_range', ('2025-08-01', '2025-08-15')),
+            test_date_range=kwargs.get(
+                'test_date_range', ('2025-08-16', '2025-08-31')),
+            sample_stride=kwargs.get('sample_stride', 1),
+            manifest_path=kwargs.get('manifest_path', None),
+            evaluation_truth=kwargs.get('evaluation_truth', 'radar'),
+            rain_truth_lag_minutes=kwargs.get(
+                'rain_truth_lag_minutes', 0),
+            rain_truth_row_shift=kwargs.get(
+                'rain_truth_row_shift', 0),
+            rain_truth_col_shift=kwargs.get(
+                'rain_truth_col_shift', 0),
+            radar_cache_path=kwargs.get('radar_cache_path', None),
+        )
+        return load_data(
+            batch_size, val_batch_size, data_root, num_workers, **cfg_dataloader)
     else:
         raise ValueError(f'Dataname {dataname} is unsupported')

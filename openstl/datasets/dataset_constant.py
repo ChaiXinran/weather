@@ -1,4 +1,11 @@
 dataset_parameters = {
+    'bth_radar': {
+        'in_shape': [10, 1, 66, 70],
+        'pre_seq_length': 10,
+        'aft_seq_length': 20,
+        'total_length': 30,
+        'metrics': ['mae', 'rmse'],
+    },
     'bair': {
         'in_shape': [4, 3, 64, 64],
         'pre_seq_length': 4,

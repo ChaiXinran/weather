@@ -94,7 +94,10 @@ class BaseExperiment(object):
         self.trainer.fit(self.method, self.data, ckpt_path=self.args.ckpt_path if self.args.ckpt_path else None)
 
     def test(self):
-        if self.args.test == True:
+        if self.args.ckpt_path:
+            ckpt = torch.load(self.args.ckpt_path, map_location='cpu')
+            self.method.load_state_dict(ckpt['state_dict'])
+        elif self.args.test == True:
             ckpt = torch.load(osp.join(self.save_dir, 'checkpoints', 'best.ckpt'))
             self.method.load_state_dict(ckpt['state_dict'])
         self.trainer.test(self.method, self.data)
