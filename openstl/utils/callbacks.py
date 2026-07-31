@@ -1,6 +1,7 @@
 import json
 import shutil
 import logging
+import time
 import os.path as osp
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint
 from .main_utils import check_dir, collect_env, print_log, output_namespace
@@ -46,15 +47,26 @@ class SetupCallback(Callback):
 
 
 class EpochEndCallback(Callback):
+    def on_train_epoch_start(self, trainer, pl_module):
+        self.epoch_start_time = time.perf_counter()
+
     def on_train_epoch_end(self, trainer, pl_module, outputs=None):
         self.avg_train_loss = trainer.callback_metrics.get('train_loss')
 
     def on_validation_epoch_end(self, trainer, pl_module):
+        if not trainer.optimizers:
+            return
         lr = trainer.optimizers[0].param_groups[0]['lr']
         avg_val_loss = trainer.callback_metrics.get('val_loss')
 
         if hasattr(self, 'avg_train_loss'):
-            print_log(f"Epoch {trainer.current_epoch}: Lr: {lr:.7f} | Train Loss: {self.avg_train_loss:.7f} | Vali Loss: {avg_val_loss:.7f}")
+            elapsed = time.perf_counter() - self.epoch_start_time
+            peak_mb = trainer.callback_metrics.get('peak_gpu_memory_mb')
+            print_log(
+                f"Epoch {trainer.current_epoch}: Lr: {lr:.7f} | "
+                f"Train Loss: {self.avg_train_loss:.7f} | "
+                f"Vali Loss: {avg_val_loss:.7f} | "
+                f"Wall: {elapsed:.1f}s | Peak GPU: {peak_mb:.1f} MiB")
 
 class BestCheckpointCallback(ModelCheckpoint):
     def __init__(self, *args, alias_name='best.ckpt', **kwargs):

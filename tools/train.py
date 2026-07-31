@@ -33,6 +33,7 @@ if __name__ == '__main__':
     rank, _ = get_dist_info()
     exp.train()
 
-    if rank == 0:
-        print('>'*35 + ' testing  ' + '<'*35)
-    mse = exp.test()
+    if not args.skip_test_after_train:
+        if rank == 0:
+            print('>'*35 + ' testing  ' + '<'*35)
+        exp.test()

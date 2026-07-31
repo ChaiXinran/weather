@@ -19,7 +19,9 @@ class SimVP(Base_method):
 
     def forward(self, batch_x, batch_y=None, **kwargs):
         pre_seq_length, aft_seq_length = self.hparams.pre_seq_length, self.hparams.aft_seq_length
-        if aft_seq_length == pre_seq_length:
+        if self.hparams.get('direct_aft_seq_length', None) is not None:
+            pred_y = self.model(batch_x)
+        elif aft_seq_length == pre_seq_length:
             pred_y = self.model(batch_x)
         elif aft_seq_length < pre_seq_length:
             pred_y = self.model(batch_x)

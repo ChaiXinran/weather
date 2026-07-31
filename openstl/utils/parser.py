@@ -21,6 +21,9 @@ def create_parser():
     parser.add_argument('--fps', action='store_true', default=False,
                         help='Whether to measure inference speed (FPS)')
     parser.add_argument('--test', action='store_true', default=False, help='Only performs testing')
+    parser.add_argument(
+        '--skip_test_after_train', action='store_true', default=False,
+        help='Do not automatically test the in-memory last model after fit')
     parser.add_argument('--deterministic', action='store_true', default=False,
                         help='whether to set deterministic options for CUDNN backend (reproducable)')
 
@@ -123,6 +126,7 @@ def default_parser():
         'seed': 42,
         'fps': False,
         'test': False,
+        'skip_test_after_train': False,
         'deterministic': False,
         # dataset parameters
         'batch_size': 16,

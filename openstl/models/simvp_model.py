@@ -16,13 +16,26 @@ class SimVP_Model(nn.Module):
 
     def __init__(self, in_shape, hid_S=16, hid_T=256, N_S=4, N_T=4, model_type='gSTA',
                  mlp_ratio=8., drop=0.0, drop_path=0.0, spatio_kernel_enc=3,
-                 spatio_kernel_dec=3, act_inplace=True, **kwargs):
+                 spatio_kernel_dec=3, act_inplace=True,
+                 direct_aft_seq_length=None, **kwargs):
         super(SimVP_Model, self).__init__()
         T, C, H, W = in_shape  # T is pre_seq_length
         H, W = int(H / 2**(N_S/2)), int(W / 2**(N_S/2))  # downsample 1 / 2**(N_S/2)
         act_inplace = False
         self.enc = Encoder(C, hid_S, N_S, spatio_kernel_enc, act_inplace=act_inplace)
         self.dec = Decoder(hid_S, C, N_S, spatio_kernel_dec, act_inplace=act_inplace)
+        self.input_length = T
+        self.output_length = (
+            T if direct_aft_seq_length is None
+            else int(direct_aft_seq_length))
+        if self.output_length != T:
+            self.latent_time_projection = nn.Conv2d(
+                T * hid_S, self.output_length * hid_S, kernel_size=1)
+            self.skip_time_projection = nn.Conv2d(
+                T * hid_S, self.output_length * hid_S, kernel_size=1)
+        else:
+            self.latent_time_projection = None
+            self.skip_time_projection = None
 
         model_type = 'gsta' if model_type is None else model_type.lower()
         if model_type == 'incepu':
@@ -41,10 +54,21 @@ class SimVP_Model(nn.Module):
 
         z = embed.view(B, T, C_, H_, W_)
         hid = self.hid(z)
-        hid = hid.reshape(B*T, C_, H_, W_)
+        if self.latent_time_projection is not None:
+            hid = self.latent_time_projection(
+                hid.reshape(B, T * C_, H_, W_))
+            skip_channels, skip_h, skip_w = skip.shape[1:]
+            skip = self.skip_time_projection(
+                skip.reshape(B, T * skip_channels, skip_h, skip_w))
+            hid = hid.reshape(
+                B * self.output_length, C_, H_, W_)
+            skip = skip.reshape(
+                B * self.output_length, skip_channels, skip_h, skip_w)
+        else:
+            hid = hid.reshape(B*T, C_, H_, W_)
 
         Y = self.dec(hid, skip)
-        Y = Y.reshape(B, T, C, H, W)
+        Y = Y.reshape(B, self.output_length, C, H, W)
         return Y
 
 

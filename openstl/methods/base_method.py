@@ -39,6 +39,11 @@ class Base_method(l.LightningModule):
                 huber_beta=args.get('r2_huber_beta', 0.05),
                 second_hour_weight=args.get(
                     'r2_second_hour_weight', 1.2),
+                soft_csi_mode=args.get('r2_soft_csi_mode', 'micro'),
+                segmented_soft_csi_weights=args.get(
+                    'r2_segmented_soft_csi_weights', None),
+                empty_event_penalty=args.get(
+                    'r2_empty_event_penalty', 0.1),
             )
         else:
             self.criterion = nn.MSELoss()
@@ -46,6 +51,7 @@ class Base_method(l.LightningModule):
         self.precipitation_evaluator = None
         self.test_sample_offset = 0
         self._val_precip = None
+        self._val_precip_lead = None
 
     def _build_model(self):
         raise NotImplementedError
@@ -91,6 +97,16 @@ class Base_method(l.LightningModule):
 
     def on_validation_epoch_start(self):
         self._val_precip = None
+        self._val_precip_lead = None
+
+    def on_train_epoch_start(self):
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(self.device)
+
+    def on_train_epoch_end(self):
+        if torch.cuda.is_available():
+            peak_mb = torch.cuda.max_memory_allocated(self.device) / 2**20
+            self.log('peak_gpu_memory_mb', peak_mb, on_epoch=True)
 
     @staticmethod
     def _safe_torch_ratio(numerator, denominator):
@@ -142,6 +158,30 @@ class Base_method(l.LightningModule):
         else:
             self._val_precip += batch_state
 
+        lead_state = []
+        for lead in range(pred.shape[1]):
+            lead_pred, lead_true = pred[:, lead:lead + 1], true[:, lead:lead + 1]
+            values = [
+                lead_pred.sum(dtype=torch.float64),
+                lead_true.sum(dtype=torch.float64),
+            ]
+            for threshold in thresholds:
+                pred_event = lead_pred >= float(threshold)
+                true_event = lead_true >= float(threshold)
+                values.extend([
+                    (pred_event & true_event).sum(dtype=torch.float64),
+                    (pred_event & ~true_event).sum(dtype=torch.float64),
+                    (~pred_event & true_event).sum(dtype=torch.float64),
+                    pred_event.sum(dtype=torch.float64),
+                    true_event.sum(dtype=torch.float64),
+                ])
+            lead_state.append(torch.stack(values))
+        lead_state = torch.stack(lead_state)
+        if self._val_precip_lead is None:
+            self._val_precip_lead = lead_state
+        else:
+            self._val_precip_lead += lead_state
+
     def on_validation_epoch_end(self):
         if self.hparams.dataname != 'bth_radar' or self._val_precip is None:
             return
@@ -185,6 +225,33 @@ class Base_method(l.LightningModule):
             + csi_values[(1, 16.0)]
             + 2.0 * csi_values[(1, 32.0)])
         self.log('val_csi_score', score, prog_bar=True)
+        lead_state = self._val_precip_lead
+        if self.trainer.world_size > 1:
+            lead_state = self.all_gather(lead_state).sum(dim=0)
+        for lead_index, values in enumerate(lead_state):
+            lead_minutes = (
+                (lead_index + 1) * int(self.hparams.get('lead_minutes', 6)))
+            self.log(
+                f'val_intensity_ratio_lead_{lead_minutes:03d}m',
+                self._safe_torch_ratio(values[0], values[1]))
+            offset = 2
+            for threshold in thresholds:
+                hits, false_alarms, misses, pred_area, true_area = \
+                    values[offset:offset + 5]
+                label = f'{float(threshold):g}'
+                self.log(
+                    f'val_csi_{label}_lead_{lead_minutes:03d}m',
+                    self._safe_torch_ratio(
+                        hits, hits + false_alarms + misses))
+                self.log(
+                    f'val_far_{label}_lead_{lead_minutes:03d}m',
+                    self._safe_torch_ratio(
+                        false_alarms, hits + false_alarms))
+                self.log(
+                    f'val_bias_{label}_lead_{lead_minutes:03d}m',
+                    self._safe_torch_ratio(
+                        pred_area, true_area))
+                offset += 5
     
     def test_step(self, batch, batch_idx):
         batch_x, batch_y = batch

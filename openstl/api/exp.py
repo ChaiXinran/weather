@@ -87,6 +87,7 @@ class BaseExperiment(object):
                     dirpath=ckpt_dir,
                     verbose=True,
                     every_n_epochs=args.log_step,
+                    save_top_k=3,
                     alias_name='best_val_csi.ckpt',
                 ),
             ])

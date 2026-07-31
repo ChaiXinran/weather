@@ -111,3 +111,46 @@ wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
   --deterministic `
   --no_display_method_info
 ```
+
+R2a/R2b/R2d 消融队列：
+
+```powershell
+wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
+  bash tools/run_bth_r2_ablations.sh
+```
+
+脚本会自动设置 `PYTHONPATH=.`，按 R2a、R2b、R2d 顺序各训练 5 epoch，
+并使用 `--skip_test_after_train` 跳过训练后的隐式 Last 测试。
+
+## R3：直接 10→20
+
+```powershell
+wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
+  env PYTHONPATH=. /home/ranye/miniconda3/envs/OpenSTL/bin/python tools/train.py `
+  --dataname bth_radar `
+  --method SimVP `
+  --config_file configs/bth_radar/SimVP_gSTA_r3.py `
+  --data_root /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S `
+  --ex_name bth_simvp_gsta_r3_direct_5ep_seed0 `
+  --epoch 5 `
+  --batch_size 16 `
+  --val_batch_size 8 `
+  --seed 0 `
+  --deterministic `
+  --no_display_method_info `
+  --skip_test_after_train
+```
+
+显式验证 checkpoint 并生成逐 lead 指标：
+
+```powershell
+wsl -d Ubuntu-D --cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL `
+  env PYTHONPATH=. /home/ranye/miniconda3/envs/OpenSTL/bin/python tools/validate.py `
+  --dataname bth_radar --method SimVP `
+  --config_file configs/bth_radar/SimVP_gSTA_r2d.py `
+  --data_root /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S `
+  --ex_name bth_simvp_gsta_r2d_best_lead_validation `
+  --batch_size 16 --val_batch_size 8 --epoch 5 --seed 0 --deterministic `
+  --no_display_method_info `
+  --ckpt_path work_dirs/bth_simvp_gsta_r2d_5ep_seed0/checkpoints/best_val_csi.ckpt
+```
