@@ -110,6 +110,10 @@ def create_parser():
     parser.add_argument('--gpus', nargs='+', default=[0], type=int)
     parser.add_argument('--metric_for_bestckpt', default='val_loss', type=str)
     parser.add_argument('--ckpt_path', default=None, type=str)
+    parser.add_argument(
+        '--init_from_ckpt', default=None, type=str,
+        help='Initialize model weights from a checkpoint without restoring '
+             'optimizer, scheduler, epoch, or global step')
 
     return parser
 
@@ -171,6 +175,8 @@ def default_parser():
         'filter_bias_and_bn': False,
         # Lightning parameters
         'gpus': [0],
-        'metric_for_bestckpt': 'val_loss'
+        'metric_for_bestckpt': 'val_loss',
+        'ckpt_path': None,
+        'init_from_ckpt': None,
     }
     return default_values

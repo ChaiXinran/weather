@@ -10,7 +10,7 @@ import torch
 from openstl.methods import method_maps
 from openstl.datasets import BaseDataModule
 from openstl.utils import (
-    get_dataset, measure_throughput, SetupCallback, EpochEndCallback,
+    get_dataset, measure_throughput, print_log, SetupCallback, EpochEndCallback,
     BestCheckpointCallback, CheckpointAliasCallback)
 
 from lightning import seed_everything, Trainer
@@ -37,6 +37,18 @@ class BaseExperiment(object):
         self.data = self._get_data(dataloaders)
         self.method = method_maps[self.args.method](steps_per_epoch=len(self.data.train_loader), \
             test_mean=self.data.test_mean, test_std=self.data.test_std, save_dir=save_dir, **self.config)
+        if args.ckpt_path and args.init_from_ckpt:
+            raise ValueError(
+                '--ckpt_path and --init_from_ckpt are mutually exclusive')
+        if args.init_from_ckpt:
+            checkpoint = torch.load(args.init_from_ckpt, map_location='cpu')
+            if 'state_dict' not in checkpoint:
+                raise KeyError(
+                    f'Checkpoint has no state_dict: {args.init_from_ckpt}')
+            self.method.load_state_dict(checkpoint['state_dict'], strict=True)
+            print_log(
+                f'Initialized model weights from {args.init_from_ckpt}; '
+                'optimizer and scheduler start fresh.')
         callbacks, self.save_dir = self._load_callbacks(args, save_dir, ckpt_dir)
         self.trainer = self._init_trainer(self.args, callbacks, strategy)
 

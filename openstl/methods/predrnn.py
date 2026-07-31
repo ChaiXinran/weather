@@ -62,6 +62,19 @@ class PredRNN(Base_method):
             self.eta, real_input_flag = schedule_sampling(
                 self.eta, self.global_step, ims.shape[0], self.hparams)
             
-        img_gen, loss = self.model(ims, real_input_flag)
+        # Recurrent models historically returned their own MSE here, bypassing
+        # Base_method.criterion.  Decode the future frames and apply the shared
+        # criterion so experiments that select a custom objective (for example
+        # BTH Radar R2d) differ by architecture rather than by loss.
+        img_gen, _ = self.model(ims, real_input_flag, return_loss=False)
+        pred_y = reshape_patch_back(img_gen, self.hparams.patch_size)
+        pred_y = pred_y[:, -self.hparams.aft_seq_length:].permute(
+            0, 1, 4, 2, 3).contiguous()
+        loss = self.criterion(pred_y, batch_y)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        for name, value in getattr(
+                self.criterion, 'last_components', {}).items():
+            self.log(
+                f'train_{name}', value, on_step=False, on_epoch=True,
+                prog_bar=False)
         return loss
