@@ -1,0 +1,114 @@
+last_updated: 2026-07-31
+baseline_model:
+  name: Tiny SimVP-gSTA
+  parameters_approx: 3300000
+  trainable_parameters: all
+  weight_size_mib: 13.171
+  checkpoint_size_mib: 39.67
+  architecture:
+    hid_S: 32
+    hid_T: 128
+    N_S: 2
+    N_T: 4
+    spatial_kernel: 3
+  temporal_mapping: Two recursive 10-to-10 predictions produce 20 output frames
+  known_limitation: The second block consumes predicted frames, accumulating smoothing and error
+training_defaults:
+  loss: Plain MSE over normalized Radar tensors
+  optimizer: Adam
+  learning_rate: 0.001
+  weight_decay: 0
+  scheduler: OneCycle
+  train_batch_size: 16
+  requested_val_batch_size: 16
+  observed_val_batch_size: 8
+  workers: 4
+  precision: fp32
+  deterministic_seed: true
+  loss_limitation: Background and weak precipitation dominate, encouraging heavy-rain underprediction and smoothing
+experiments:
+  - id: linear_tendency_smoke_2025-08-01
+    status: completed
+    purpose: Validate data and metrics with a simple tendency forecast
+    samples: 211
+    stride: 1
+    result: Worse than persistence
+    metrics:
+      model_mae: 0.843
+      persistence_mae: 0.6654
+      model_rmse: 3.9668
+      persistence_rmse: 3.2336
+      bias_35_model: 2.78
+      bias_35_persistence: 0.994
+      bias_45_model: 7.54
+      bias_45_persistence: 0.987
+  - id: bth_simvp_gsta_smoke_10ep_s10
+    status: completed
+    epochs: 10
+    stride: 10
+    purpose: End-to-end Radar-only smoke test
+    caveat: Uses an older evaluation protocol/scale; do not compare its values directly with the frozen formal protocol
+    output: work_dirs/bth_simvp_gsta_smoke_10ep_s10
+  - id: bth_simvp_gsta_smoke_10ep_s10_rain_truth
+    status: completed
+    epochs: 10
+    stride: 10
+    purpose: Direct Rain-PNG truth diagnostic with frozen temporal/spatial alignment
+    caveat: Rain is capped/quantized and this is not the formal evaluation truth
+    output: work_dirs/bth_simvp_gsta_smoke_10ep_s10_rain_truth
+  - id: bth_simvp_gsta_formal_seed0
+    status: completed
+    epochs: 30
+    seed: 0
+    stride: 1
+    train_samples: 11245
+    test_samples: 5182
+    approximate_training_time: 1h55m
+    approximate_test_time: 40m
+    output: work_dirs/bth_simvp_gsta_formal_seed0
+    training:
+      train_loss_epoch_1: 0.018725
+      train_loss_epoch_30: 0.001702
+      best_val_loss: 0.0103946
+      best_val_loss_epoch_index: 2
+      final_val_loss: 0.0139349
+      interpretation: Validation worsened after the early optimum; overfitting occurred
+    best_val_loss_checkpoint:
+      model: {mae: 0.435604, rmse: 2.485620, mean_error: -0.37775, intensity_ratio: 0.36393}
+      persistence: {mae: 0.634024, rmse: 3.148734}
+      csi_model: {0.1: 0.64982, 2.5: 0.24600, 8: 0.08558, 16: 0.03193, 32: 0.01015}
+      csi_16_by_period: {0-1h: 0.06265, 1-2h: 0.000393}
+      csi_32_by_period: {0-1h: 0.02008, 1-2h: 0.0000137}
+      report: work_dirs/bth_simvp_gsta_formal_seed0/saved/precipitation_evaluation_best
+    last_checkpoint:
+      model: {mae: 0.450829, rmse: 2.445422, mean_error: -0.267625, intensity_ratio: 0.54936}
+      persistence: {mae: 0.634024, rmse: 3.148734, intensity_ratio: 0.99978}
+      csi_model: {0.1: 0.60021, 2.5: 0.34265, 8: 0.14421, 16: 0.05749, 32: 0.016818}
+      csi_persistence: {0.1: 0.57303, 2.5: 0.31804, 8: 0.17715, 16: 0.11308, 32: 0.06934}
+      csi_16_by_period_model: {0-1h: 0.10552, 1-2h: 0.009168}
+      csi_16_by_period_persistence: {0-1h: 0.186999, 1-2h: 0.04779}
+      csi_32_by_period_model: {0-1h: 0.033009, 1-2h: 0.000438}
+      csi_32_by_period_persistence: {0-1h: 0.121876, 1-2h: 0.021468}
+      report: work_dirs/bth_simvp_gsta_formal_seed0/saved/precipitation_evaluation_last
+    conclusion: Lower continuous error than persistence, but strong-rain CSI, area, energy, and intensity are substantially worse; MSE produces severe smoothing
+  - id: bth_simvp_gsta_r1_5ep_seed0
+    status: incomplete
+    intended_epochs: 5
+    completed_epochs_observed: 3
+    seed: 0
+    purpose: Select checkpoints by precipitation validation score as well as validation loss
+    precipitation_score: CSI16_0-1h + CSI32_0-1h + CSI16_1-2h + 2*CSI32_1-2h
+    checkpoints:
+      best_val_csi: {epoch: 0, score: 0.331482}
+      best_val_loss: {epoch: 1, val_loss: 0.010082}
+      last_completed_epoch: 2
+    output: work_dirs/bth_simvp_gsta_r1_5ep_seed0
+    caveat: No completed test evaluation or final conclusion; do not treat as a finished result
+historical_partial_runs:
+  - bth_simvp_gsta_10ep
+  - smoke_10ep
+  - smoke_10ep_b16
+checkpoints_current_policy:
+  files: [best_val_loss.ckpt, best_val_csi.ckpt, last.ckpt]
+  explicit_test_loading: The requested ckpt_path is loaded explicitly
+

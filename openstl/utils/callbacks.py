@@ -57,16 +57,44 @@ class EpochEndCallback(Callback):
             print_log(f"Epoch {trainer.current_epoch}: Lr: {lr:.7f} | Train Loss: {self.avg_train_loss:.7f} | Vali Loss: {avg_val_loss:.7f}")
 
 class BestCheckpointCallback(ModelCheckpoint):
-    def on_validation_epoch_end(self, trainer, pl_module):
-        super().on_validation_epoch_end(trainer, pl_module)
-        checkpoint_callback = trainer.checkpoint_callback
-        if checkpoint_callback and checkpoint_callback.best_model_path and trainer.global_rank == 0:
-            best_path = checkpoint_callback.best_model_path
-            shutil.copy(best_path, osp.join(osp.dirname(best_path), 'best.ckpt'))
+    def __init__(self, *args, alias_name='best.ckpt', **kwargs):
+        self.alias_name = alias_name
+        super().__init__(*args, **kwargs)
+
+    def on_validation_end(self, trainer, pl_module):
+        super().on_validation_end(trainer, pl_module)
+        if self.best_model_path and trainer.global_rank == 0:
+            shutil.copy(
+                self.best_model_path,
+                osp.join(osp.dirname(self.best_model_path), self.alias_name))
 
     def on_test_end(self, trainer, pl_module):
         super().on_test_end(trainer, pl_module)
-        checkpoint_callback = trainer.checkpoint_callback
-        if checkpoint_callback and checkpoint_callback.best_model_path and trainer.global_rank == 0:
-            best_path = checkpoint_callback.best_model_path
-            shutil.copy(best_path, osp.join(osp.dirname(best_path), 'best.ckpt'))
+        if self.best_model_path and trainer.global_rank == 0:
+            shutil.copy(
+                self.best_model_path,
+                osp.join(osp.dirname(self.best_model_path), self.alias_name))
+
+
+class CheckpointAliasCallback(Callback):
+    """Copy stable checkpoint aliases after all ModelCheckpoint hooks run."""
+
+    @staticmethod
+    def _copy_aliases(trainer):
+        if not trainer.is_global_zero:
+            return
+        for callback in trainer.checkpoint_callbacks:
+            best_path = getattr(callback, 'best_model_path', '')
+            alias_name = getattr(callback, 'alias_name', '')
+            if best_path and alias_name:
+                shutil.copy(
+                    best_path, osp.join(osp.dirname(best_path), alias_name))
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        self._copy_aliases(trainer)
+
+    def on_validation_end(self, trainer, pl_module):
+        self._copy_aliases(trainer)
+
+    def on_fit_end(self, trainer, pl_module):
+        self._copy_aliases(trainer)

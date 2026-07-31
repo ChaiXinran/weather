@@ -1437,3 +1437,7 @@ python tools/cache_bth_radar.py \
 缓存只改变存储与读取方式，不改变样本窗口、时间戳、事件划分、像素值、
 归一化或评估协议。原 PNG 仍是可追溯源数据，不应删除。
 
+> **项目续接入口（2026-07-31）**：新对话或新执行环境应先阅读
+> [`.research/context_index.md`](context_index.md)。机器可读的项目、数据和实验状态分别在
+> `project_manifest.yml`、`data_dictionary.yml`、`experiment_matrix.yml`；冻结决策和待解决问题分别在
+> `decisions.md`、`open_questions.md`。本文件继续作为研究方案和评估协议的详细正文。

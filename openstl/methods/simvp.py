@@ -46,4 +46,9 @@ class SimVP(Base_method):
         pred_y = self(batch_x)
         loss = self.criterion(pred_y, batch_y)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        for name, value in getattr(
+                self.criterion, 'last_components', {}).items():
+            self.log(
+                f'train_{name}', value, on_step=False, on_epoch=True,
+                prog_bar=False)
         return loss

@@ -1,0 +1,11 @@
+last_updated: 2026-07-31
+versions:
+  - version: V0.1
+    slug: radar_simvp_30epoch_seed0
+    date: 2026-07-30
+    status: completed
+    record: .research/history/V0.1_radar_simvp_30epoch_seed0.md
+    experiment_id: bth_simvp_gsta_formal_seed0
+    artifact_root: work_dirs/bth_simvp_gsta_formal_seed0
+    summary: First formal Radar-only Tiny SimVP baseline, 30 epochs, seed 0
+

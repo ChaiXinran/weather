@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import torch.nn as nn
 import os.path as osp
 import lightning as l
@@ -6,6 +7,7 @@ from openstl.utils import print_log, check_dir
 from openstl.core import get_optim_scheduler, timm_schedulers
 from openstl.core import metric
 from openstl.core.precipitation_metrics import PrecipitationEvaluator
+from openstl.core.precipitation_loss import PrecipitationR2Loss
 
 
 class Base_method(l.LightningModule):
@@ -21,10 +23,29 @@ class Base_method(l.LightningModule):
 
         self.save_hyperparameters()
         self.model = self._build_model(**args)
-        self.criterion = nn.MSELoss()
+        self.validation_criterion = nn.MSELoss()
+        if args.get('loss_type', 'mse') == 'precipitation_r2':
+            self.criterion = PrecipitationR2Loss(
+                value_scale=args.get('radar_value_scale', 50.0),
+                zr_a=args.get('zr_a', 200.0),
+                zr_b=args.get('zr_b', 1.6),
+                thresholds=args.get('r2_thresholds', [16.0, 32.0]),
+                intensity_weights=args.get(
+                    'r2_intensity_weights', [2.0, 3.0]),
+                soft_csi_weights=args.get(
+                    'r2_soft_csi_weights', [0.005, 0.001]),
+                soft_csi_temperature=args.get(
+                    'r2_soft_csi_temperature', 0.03),
+                huber_beta=args.get('r2_huber_beta', 0.05),
+                second_hour_weight=args.get(
+                    'r2_second_hour_weight', 1.2),
+            )
+        else:
+            self.criterion = nn.MSELoss()
         self.test_outputs = []
         self.precipitation_evaluator = None
         self.test_sample_offset = 0
+        self._val_precip = None
 
     def _build_model(self):
         raise NotImplementedError
@@ -62,9 +83,108 @@ class Base_method(l.LightningModule):
     def validation_step(self, batch, batch_idx):
         batch_x, batch_y = batch
         pred_y = self(batch_x, batch_y)
-        loss = self.criterion(pred_y, batch_y)
+        loss = self.validation_criterion(pred_y, batch_y)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=False)
+        if self.hparams.dataname == 'bth_radar':
+            self._update_val_precipitation(pred_y, batch_y)
         return loss
+
+    def on_validation_epoch_start(self):
+        self._val_precip = None
+
+    @staticmethod
+    def _safe_torch_ratio(numerator, denominator):
+        return numerator / denominator.clamp_min(1.0)
+
+    def _to_precipitation(self, values):
+        values = (values.detach().float()
+                  * float(self.hparams.get('radar_value_scale', 50.0)))
+        clip_range = self.hparams.get('precip_clip_range', [0.0, 50.0])
+        values = values.clamp(float(clip_range[0]), float(clip_range[1]))
+        if self.hparams.get('convert_dbz_to_rain', False):
+            reflectivity = torch.pow(10.0, values / 10.0)
+            values = torch.pow(
+                reflectivity / float(self.hparams.get('zr_a', 200.0)),
+                1.0 / float(self.hparams.get('zr_b', 1.6)))
+        return values
+
+    def _update_val_precipitation(self, pred_y, batch_y):
+        pred = self._to_precipitation(pred_y)
+        if self.hparams.get('evaluation_truth', 'radar') == 'rain_png':
+            # The validation loader returns Radar targets. Rain-PNG replacement
+            # is intentionally reserved for the ordered, event-aware test pass.
+            true = self._to_precipitation(batch_y)
+        else:
+            true = self._to_precipitation(batch_y)
+        thresholds = self.hparams.get('val_precip_thresholds', [16.0, 32.0])
+        period_size = min(10, pred.shape[1])
+        periods = [(0, period_size), (period_size, pred.shape[1])]
+        state = []
+        for start, end in periods:
+            period_pred, period_true = pred[:, start:end], true[:, start:end]
+            pred_sum = period_pred.sum(dtype=torch.float64)
+            true_sum = period_true.sum(dtype=torch.float64)
+            values = [pred_sum, true_sum]
+            for threshold in thresholds:
+                pred_event = period_pred >= float(threshold)
+                true_event = period_true >= float(threshold)
+                values.extend([
+                    (pred_event & true_event).sum(dtype=torch.float64),
+                    (pred_event & ~true_event).sum(dtype=torch.float64),
+                    (~pred_event & true_event).sum(dtype=torch.float64),
+                    pred_event.sum(dtype=torch.float64),
+                    true_event.sum(dtype=torch.float64),
+                ])
+            state.append(torch.stack(values))
+        batch_state = torch.stack(state)
+        if self._val_precip is None:
+            self._val_precip = batch_state
+        else:
+            self._val_precip += batch_state
+
+    def on_validation_epoch_end(self):
+        if self.hparams.dataname != 'bth_radar' or self._val_precip is None:
+            return
+        state = self._val_precip
+        if self.trainer.world_size > 1:
+            state = self.all_gather(state).sum(dim=0)
+        thresholds = self.hparams.get('val_precip_thresholds', [16.0, 32.0])
+        csi_values = {}
+        for period_index, period_name in enumerate(('0_1h', '1_2h')):
+            values = state[period_index]
+            self.log(
+                f'val_intensity_ratio_{period_name}',
+                self._safe_torch_ratio(values[0], values[1]),
+                prog_bar=False)
+            offset = 2
+            for threshold in thresholds:
+                hits, false_alarms, misses, pred_area, true_area = \
+                    values[offset:offset + 5]
+                label = f'{float(threshold):g}'
+                csi = self._safe_torch_ratio(
+                    hits, hits + false_alarms + misses)
+                csi_values[(period_index, float(threshold))] = csi
+                self.log(f'val_csi_{label}_{period_name}', csi)
+                self.log(
+                    f'val_pod_{label}_{period_name}',
+                    self._safe_torch_ratio(hits, hits + misses))
+                self.log(
+                    f'val_far_{label}_{period_name}',
+                    self._safe_torch_ratio(false_alarms, hits + false_alarms))
+                self.log(
+                    f'val_bias_{label}_{period_name}',
+                    self._safe_torch_ratio(
+                        hits + false_alarms, hits + misses))
+                self.log(
+                    f'val_area_ratio_{label}_{period_name}',
+                    self._safe_torch_ratio(pred_area, true_area))
+                offset += 5
+        score = (
+            csi_values[(0, 16.0)]
+            + csi_values[(0, 32.0)]
+            + csi_values[(1, 16.0)]
+            + 2.0 * csi_values[(1, 32.0)])
+        self.log('val_csi_score', score, prog_bar=True)
     
     def test_step(self, batch, batch_idx):
         batch_x, batch_y = batch

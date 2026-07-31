@@ -1,7 +1,5 @@
 method = 'SimVP'
 
-# Radar frames are 66 x 70. N_S=2 keeps encoder/decoder scaling compatible
-# with these even dimensions.
 spatio_kernel_enc = 3
 spatio_kernel_dec = 3
 model_type = 'gSTA'
@@ -10,7 +8,6 @@ hid_T = 128
 N_S = 2
 N_T = 4
 
-# Provisional V0 training defaults.
 lr = 1e-3
 batch_size = 8
 val_batch_size = 8
@@ -18,17 +15,10 @@ drop_path = 0.0
 sched = 'onecycle'
 epoch = 50
 
-# Event-first split: windows are read from this frozen manifest instead of
-# being cut by date and subsequently treated as independent observations.
 manifest_path = '.research/bth_2025_events.json'
-# Lossless uint8 NPY cache relative to data_root. Build once with
-# tools/cache_bth_radar.py; remove this option to fall back to PNG decoding.
 radar_cache_path = 'RADAR_CACHE_UINT8'
 
-# Frozen evaluation interface. Fitted once from unique timestamp-matched
-# Radar--RAIN grid pairs in train events; validation/test never refit Z-R.
 precip_thresholds = [0.1, 2.5, 8.0, 16.0, 32.0]
-# R1 validation protocol: lightweight strong-rain checkpoint selection.
 val_precip_thresholds = [16.0, 32.0]
 radar_value_scale = 50.0
 precip_value_unit = 'mm/h'
@@ -47,3 +37,13 @@ bootstrap_seed = 42
 lead_minutes = 6
 case_threshold = 32.0
 case_count = 3
+
+# R2 changes only the training objective. Validation remains pure MSE plus the
+# R1 strong-precipitation metrics and dual-checkpoint protocol.
+loss_type = 'precipitation_r2'
+r2_thresholds = [16.0, 32.0]
+r2_intensity_weights = [2.0, 3.0]
+r2_soft_csi_weights = [0.005, 0.001]
+r2_soft_csi_temperature = 0.03
+r2_huber_beta = 0.05
+r2_second_hour_weight = 1.2

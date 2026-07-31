@@ -1,0 +1,94 @@
+last_updated: 2026-07-31
+spatial_domain:
+  name: Beijing-Tianjin-Hebei
+  grid_shape: [66, 70]
+  approximate_resolution: 0.1 degree, about 10 km
+  time_interval_minutes: 6
+sequence_definition:
+  input:
+    variable: Radar reflectivity
+    frames: 10
+    duration_minutes: 60
+    tensor_shape_per_sample: [10, 1, 66, 70]
+  target:
+    variable: Future Radar reflectivity
+    frames: 20
+    duration_minutes: 120
+    tensor_shape_per_sample: [20, 1, 66, 70]
+  persistence: Repeat the last input frame for all 20 forecast leads
+radar:
+  source_format: inverse-grayscale PNG
+  decoded_dbz: (255 - pixel) * 50 / 255
+  training_normalization: (255 - pixel) / 255
+  value_range_normalized: [0, 1]
+  truth_for_formal_evaluation: Future Radar converted to rain rate by the frozen Z-R relation
+rain:
+  source_format: inverse-grayscale PNG
+  probable_decode_mm_per_hour: (255 - pixel) * 35 / 255
+  limitations:
+    - Quantized and capped at 35 mm/h
+    - Not independent rain-gauge validation
+    - Used for Z-R selection and diagnostic rain-truth evaluation, not the formal Radar-truth score
+  frozen_alignment:
+    lag_minutes: 42
+    row_shift: 0
+    col_shift: 1
+zr_conversion:
+  formula: Z = a * R^b
+  operational_a: 200.0
+  operational_b: 1.6
+  z0_dbz: 0.0
+  decision_artifact: .research/zr_protocol_decision.json
+event_manifests:
+  bth_2025:
+    path: .research/bth_2025_events.json
+    events_total: 65
+    samples_total: 17359
+    frames_radar_unique: 32457
+    frames_rain_unique: 29511
+    splits:
+      train: {events: 56, samples: 11245}
+      val: {events: 4, samples: 932}
+      test: {events: 5, samples: 5182}
+    role: Primary development and test year
+  bth_2023:
+    path: .research/bth_2023_events.json
+    events_total: 59
+    samples_total: 8204
+    frames_radar_unique: 24144
+    frames_rain_unique: 2952
+    splits:
+      train: {events: 42, samples: 4921}
+      val: {events: 8, samples: 1868}
+      test: {events: 9, samples: 1415}
+    role: External-year diagnostic only
+    caveat: Rain has duplicate timestamps on 2023-07-29 in two directories
+event_definition:
+  radar_dbz_threshold: 20
+  wet_fraction_threshold: 0.01
+  maximum_dry_gap_hours: 3
+  padding_minutes: 30
+  input_frames: 10
+  output_frames: 20
+  stride_default: 1
+cache:
+  type: Lossless contiguous uint8 Radar frame cache
+  wsl_path: /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S/RADAR_CACHE_UINT8
+  files:
+    frames: frames.npy
+    manifest: manifest.json
+  shape: [32457, 66, 70]
+  dtype: uint8
+  approximate_size_mib: 144
+  access: NumPy mmap, opened lazily per data-loader worker
+  normalization_deferred_to_loading: true
+  verification: First, middle, and last frames exactly matched their PNG sources
+  io_benchmark:
+    workload: 100 samples of 10 input plus 20 target frames
+    png_seconds: 11.727
+    cache_seconds: 0.069
+    speedup: 168.99
+    scope: I/O microbenchmark, not end-to-end training speed
+  builder: tools/cache_bth_radar.py
+raw_2025_wsl_root: /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S
+

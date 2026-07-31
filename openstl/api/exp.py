@@ -9,7 +9,9 @@ import torch
 
 from openstl.methods import method_maps
 from openstl.datasets import BaseDataModule
-from openstl.utils import (get_dataset, measure_throughput, SetupCallback, EpochEndCallback, BestCheckpointCallback)
+from openstl.utils import (
+    get_dataset, measure_throughput, SetupCallback, EpochEndCallback,
+    BestCheckpointCallback, CheckpointAliasCallback)
 
 from lightning import seed_everything, Trainer
 import lightning.pytorch.callbacks as lc
@@ -62,19 +64,43 @@ class BaseExperiment(object):
             argv_content = sys.argv + ["gpus: {}".format(torch.cuda.device_count())],
         )
 
-        ckpt_callback = BestCheckpointCallback(
-            monitor=args.metric_for_bestckpt,
-            filename='best-{epoch:02d}-{val_loss:.3f}',
-            mode='min',
-            save_last=True,
-            dirpath=ckpt_dir,
-            verbose=True,
-            every_n_epochs=args.log_step,
-        )
-        
         epochend_callback = EpochEndCallback()
 
-        callbacks = [setup_callback, ckpt_callback, epochend_callback]
+        callbacks = [setup_callback]
+        if args.dataname == 'bth_radar':
+            callbacks.extend([
+                BestCheckpointCallback(
+                    monitor='val_loss',
+                    filename='val-loss-{epoch:02d}-{val_loss:.6f}',
+                    mode='min',
+                    save_last=True,
+                    dirpath=ckpt_dir,
+                    verbose=True,
+                    every_n_epochs=args.log_step,
+                    alias_name='best_val_loss.ckpt',
+                ),
+                BestCheckpointCallback(
+                    monitor='val_csi_score',
+                    filename='val-csi-{epoch:02d}-{val_csi_score:.6f}',
+                    mode='max',
+                    save_last=False,
+                    dirpath=ckpt_dir,
+                    verbose=True,
+                    every_n_epochs=args.log_step,
+                    alias_name='best_val_csi.ckpt',
+                ),
+            ])
+        else:
+            callbacks.append(BestCheckpointCallback(
+                monitor=args.metric_for_bestckpt,
+                filename='best-{epoch:02d}-{val_loss:.3f}',
+                mode='min',
+                save_last=True,
+                dirpath=ckpt_dir,
+                verbose=True,
+                every_n_epochs=args.log_step,
+            ))
+        callbacks.extend([epochend_callback, CheckpointAliasCallback()])
         if args.sched:
             callbacks.append(lc.LearningRateMonitor(logging_interval=None))
         return callbacks, save_dir

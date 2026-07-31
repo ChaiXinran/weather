@@ -1,0 +1,36 @@
+project_name: BTH physically interpretable precipitation nowcasting
+research_area: Multi-source deep learning for short-term precipitation nowcasting over Beijing-Tianjin-Hebei
+research_question: >-
+  Can Radar, dynamic PWV, and static DEM be fused through an explicit
+  motion/source-sink formulation to improve 0-120 minute precipitation
+  nowcasting—especially heavy-rain initiation, intensification, persistence,
+  and displacement—without inflating weak-rain area?
+current_stage: experiments
+last_updated: 2026-07-31
+repository:
+  windows_path: D:\_Search\AIforScience\Rewritten\origin\OpenSTL
+  wsl_path: /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL
+  upstream: OpenSTL
+  branch: main
+  baseline_commit: a65210d
+primary_context: .research/context_index.md
+research_protocol: .research/detail.md
+data_dictionary: .research/data_dictionary.yml
+experiment_matrix: .research/experiment_matrix.yml
+decisions: .research/decisions.md
+open_questions: .research/open_questions.md
+run_log: .research/run_log.md
+history_index: .research/history/index.yml
+status_summary:
+  completed:
+    - BTH Radar event manifests for 2023 and 2025
+    - Lossless uint8 Radar frame cache with mmap loading
+    - Radar-only SimVP baseline and five-layer precipitation evaluation
+    - Frozen Marshall-Palmer Z-R conversion and Rain alignment protocol
+    - One formal 30-epoch seed-0 baseline run and best/last checkpoint reports
+  in_progress:
+    - Validation precipitation score and dual-checkpoint R1 experiment
+  planned:
+    - Strong-rain-aware loss
+    - Multi-seed Radar-only baseline
+    - PWV and DEM fusion stages
