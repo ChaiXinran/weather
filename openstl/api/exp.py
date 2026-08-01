@@ -148,7 +148,8 @@ class BaseExperiment(object):
             assign_gpu = 'cuda:' + (str(args.gpus[0]) if len(args.gpus) == 1 else '0')
             device = torch.device(assign_gpu)
         T, C, H, W = args.in_shape
-        if args.method in ['simvp', 'tau', 'mmvp', 'wast']:
+        if args.method in ['simvp', 'tau', 'mmvp', 'wast',
+                           'evolutionconvlstm', 'evolution_convlstm']:
             input_dummy = torch.ones(1, args.pre_seq_length, C, H, W).to(device)
         elif args.method == 'phydnet':
             _tmp_input1 = torch.ones(1, args.pre_seq_length, C, H, W).to(device)

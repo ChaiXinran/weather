@@ -55,12 +55,17 @@ def create_parser():
                         choices=['ConvLSTM', 'convlstm', 'E3DLSTM', 'e3dlstm', 'MAU', 'mau', 'MIM', 'mim', 
                                 'PhyDNet', 'phydnet', 'PredRNN', 'predrnn', 'PredRNNpp',  'predrnnpp', 
                                 'PredRNNv2', 'predrnnv2', 'SimVP', 'simvp', 'TAU', 'tau', 'MMVP', 'mmvp', 
-                                'SwinLSTM', 'swinlstm', 'swinlstm_d', 'swinlstm_b'],
+                                'SwinLSTM', 'swinlstm', 'swinlstm_d', 'swinlstm_b',
+                                'EvolutionConvLSTM', 'evolution_convlstm'],
                         help='Name of video prediction method to train (default: "SimVP")')
     parser.add_argument('--config_file', '-c', default=None, type=str,
                         help='Path to the default config file')
     parser.add_argument('--model_type', default=None, type=str,
                         help='Name of model for SimVP (default: None)')
+    parser.add_argument(
+        '--evolution_encoder_checkpoint', default=None, type=str,
+        help='ConvLSTM encoder initialization checkpoint; use "none" for '
+             'the scratch EvolutionConvLSTM ablation')
     parser.add_argument('--drop', type=float, default=0.0, help='Dropout rate(default: 0.)')
     parser.add_argument('--drop_path', type=float, default=0.0, help='Drop path rate for SimVP (default: 0.)')
     parser.add_argument('--overwrite', action='store_true', default=False,
@@ -148,6 +153,7 @@ def default_parser():
         'method': 'SimVP',
         'config_file': None,
         'model_type': 'gSTA',
+        'evolution_encoder_checkpoint': None,
         'drop': 0,
         'drop_path': 0,
         'overwrite': False,
