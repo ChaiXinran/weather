@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from openstl.api import BaseExperiment
-from openstl.modules import backward_warp
+from openstl.modules import backward_warp, warp_field
 from openstl.utils import (check_dir, create_parser, default_parser,
                            load_config, update_config)
 
@@ -152,6 +152,8 @@ def main():
     states = {name: _mode_state(leads, thresholds, windows)
               for name in ('recursive', 'cumulative_single_warp',
                            'teacher_forced',
+                           'teacher_forced_linear_z',
+                           'teacher_forced_rain_rate',
                            'teacher_forced_zero_flow')}
     flow_accumulators = {
         key: np.zeros(leads) for key in (
@@ -173,14 +175,36 @@ def main():
                 for lead in range(leads)], dim=1)
             previous_truth = torch.cat((batch_x[:, -1:], batch_y[:, :-1]), dim=1)
             teacher_prediction = torch.stack([
-                backward_warp(previous_truth[:, lead], flow[:, lead],
-                              method.model.operator.align_corners,
-                              method.model.operator.padding_mode)
+                warp_field(
+                    previous_truth[:, lead], flow[:, lead],
+                    field_space='normalized_dbz',
+                    value_scale=args.radar_value_scale,
+                    zr_a=args.zr_a, zr_b=args.zr_b,
+                    align_corners=method.model.operator.align_corners,
+                    padding_mode=method.model.operator.padding_mode)
+                for lead in range(leads)], dim=1)
+            teacher_linear_z = torch.stack([
+                warp_field(
+                    previous_truth[:, lead], flow[:, lead],
+                    field_space='linear_z', value_scale=args.radar_value_scale,
+                    zr_a=args.zr_a, zr_b=args.zr_b,
+                    align_corners=method.model.operator.align_corners,
+                    padding_mode=method.model.operator.padding_mode)
+                for lead in range(leads)], dim=1)
+            teacher_rain_rate = torch.stack([
+                warp_field(
+                    previous_truth[:, lead], flow[:, lead],
+                    field_space='rain_rate', value_scale=args.radar_value_scale,
+                    zr_a=args.zr_a, zr_b=args.zr_b,
+                    align_corners=method.model.operator.align_corners,
+                    padding_mode=method.model.operator.padding_mode)
                 for lead in range(leads)], dim=1)
             predictions = {
                 'recursive': result['prediction'],
                 'cumulative_single_warp': cumulative_prediction,
                 'teacher_forced': teacher_prediction,
+                'teacher_forced_linear_z': teacher_linear_z,
+                'teacher_forced_rain_rate': teacher_rain_rate,
                 'teacher_forced_zero_flow': previous_truth,
             }
             rain_truth = method._to_precipitation(batch_y)
@@ -249,6 +273,8 @@ def main():
             'recursive': '20 sequential resampling operations',
             'cumulative_single_warp': 'sum incremental flow; one resampling from X0 per lead',
             'teacher_forced': 'warp true previous frame; isolates one-step flow quality',
+            'teacher_forced_linear_z': 'teacher-forced warp in linear reflectivity Z',
+            'teacher_forced_rain_rate': 'teacher-forced warp in Marshall-Palmer rain rate',
             'teacher_forced_zero_flow': (
                 'true previous frame without warp; control for six-minute persistence'),
         },

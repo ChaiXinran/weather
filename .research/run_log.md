@@ -14,6 +14,9 @@
 - Full analysis: `.research/history/r4b_motion_pre0788_5ep_analysis.md`.
 - Large diagnostics remain under
   `work_dirs/bth_r4b_motion_pre0788_best_valdiag/`.
+- Added a no-retraining operator audit with normalized-dBZ, linear-Z,
+  rain-rate, and zero-flow teacher-forced modes. Physical-space warping restored
+  substantial strong-rain CSI/FSS but did not yet beat zero flow.
 
 ## 2026-07-31 — Historical version archive
 

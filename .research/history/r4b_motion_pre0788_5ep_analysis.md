@@ -131,6 +131,28 @@ full-rollout centroid/FAR gains cannot yet be attributed to correct motion;
 they are substantially confounded by erosion and selective survival of fewer
 objects.
 
+### Physical-variable-space operator audit
+
+Using the same checkpoint and exactly the same predicted flows, teacher-forced
+warping was repeated in normalized dBZ, linear reflectivity Z, Marshall--Palmer
+rain rate, and with zero flow. No model was retrained.
+
+| Warp space | MAE norm. | CSI16 | CSI32 | FSS3@16 | FSS3@32 | Centroid16 km | Centroid32 km |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| normalized dBZ | **0.01356** | 0.5629 | 0.3686 | 0.8929 | 0.7257 | 39.88 | 48.38 |
+| linear Z | 0.01699 | 0.6056 | 0.5092 | 0.9107 | 0.8509 | 32.66 | 38.00 |
+| rain rate | 0.01523 | 0.6187 | 0.4734 | 0.9183 | 0.8224 | 33.26 | 41.56 |
+| zero flow | 0.01541 | **0.6201** | **0.5519** | **0.9238** | **0.8751** | **27.30** | **32.14** |
+
+The operator-space hypothesis is strongly supported: physical-space warping
+recovers much of the CSI/FSS loss caused by interpolating logarithmic dBZ.
+For a synthetic 50-dBZ pixel shifted by 0.34 pixels, the retained normalized
+peak is 0.660 in normalized-dBZ space, 0.964 in linear Z, and 0.942 in rain-rate
+space. However, neither physical space beats zero flow on strong-rain
+localization with the currently learned flows. Operator space is therefore a
+major error source but not the only one; stop-gradient and motion supervision
+still require controlled retraining.
+
 ## Verdict
 
 **Motion gate failed / no-go for R4-c promotion.**

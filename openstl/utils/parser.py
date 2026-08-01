@@ -66,6 +66,13 @@ def create_parser():
         '--evolution_encoder_checkpoint', default=None, type=str,
         help='ConvLSTM encoder initialization checkpoint; use "none" for '
              'the scratch EvolutionConvLSTM ablation')
+    parser.add_argument(
+        '--evolution_field_space', default=None, type=str,
+        choices=['normalized_dbz', 'linear_z', 'rain_rate'],
+        help='Variable space used by the differentiable evolution warp')
+    parser.add_argument(
+        '--evolution_stop_gradient', action='store_true', default=False,
+        help='Detach the evolved field between successive evolution steps')
     parser.add_argument('--drop', type=float, default=0.0, help='Dropout rate(default: 0.)')
     parser.add_argument('--drop_path', type=float, default=0.0, help='Drop path rate for SimVP (default: 0.)')
     parser.add_argument('--overwrite', action='store_true', default=False,
@@ -154,6 +161,8 @@ def default_parser():
         'config_file': None,
         'model_type': 'gSTA',
         'evolution_encoder_checkpoint': None,
+        'evolution_field_space': None,
+        'evolution_stop_gradient': False,
         'drop': 0,
         'drop_path': 0,
         'overwrite': False,

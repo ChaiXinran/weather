@@ -68,9 +68,7 @@ class EvolutionConvLSTM(Base_method):
 
         previous = torch.cat((batch_x[:, -1:], batch_y[:, :-1]), dim=1)
         transported = torch.stack([
-            backward_warp(previous[:, step], result['flow'][:, step],
-                          self.model.operator.align_corners,
-                          self.model.operator.padding_mode)
+            self.model.operator.warp(previous[:, step], result['flow'][:, step])
             for step in range(batch_y.shape[1])
         ], dim=1)
         tf_loss = torch.nn.functional.smooth_l1_loss(transported, batch_y)

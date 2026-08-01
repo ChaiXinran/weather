@@ -33,13 +33,56 @@ def backward_warp(field, flow, align_corners=True, padding_mode='zeros'):
                          align_corners=align_corners)
 
 
+def warp_field(field, flow, field_space='normalized_dbz', value_scale=50.0,
+               zr_a=200.0, zr_b=1.6, align_corners=True,
+               padding_mode='zeros', eps=1e-6):
+    """Warp a normalized-dBZ field in a selected physical variable space."""
+    if field_space == 'normalized_dbz':
+        return backward_warp(
+            field, flow, align_corners=align_corners,
+            padding_mode=padding_mode)
+    dbz = field * float(value_scale)
+    linear_z = torch.pow(10.0, dbz / 10.0)
+    if field_space == 'linear_z':
+        warped = backward_warp(
+            linear_z, flow, align_corners=align_corners,
+            padding_mode=padding_mode)
+        warped_dbz = 10.0 * torch.log10(warped.clamp_min(eps))
+    elif field_space == 'rain_rate':
+        rain_rate = torch.pow(linear_z / float(zr_a), 1.0 / float(zr_b))
+        warped = backward_warp(
+            rain_rate, flow, align_corners=align_corners,
+            padding_mode=padding_mode)
+        warped_z = float(zr_a) * torch.pow(warped.clamp_min(eps), float(zr_b))
+        warped_dbz = 10.0 * torch.log10(warped_z.clamp_min(eps))
+    else:
+        raise ValueError(
+            'field_space must be normalized_dbz, linear_z, or rain_rate')
+    return (warped_dbz / float(value_scale)).clamp(0.0, 1.0)
+
+
 class EvolutionOperator(nn.Module):
     """Autoregressive differentiable advection with an optional source term."""
 
-    def __init__(self, align_corners=True, padding_mode='zeros'):
+    def __init__(self, align_corners=True, padding_mode='zeros',
+                 field_space='normalized_dbz', value_scale=50.0,
+                 zr_a=200.0, zr_b=1.6, stop_gradient=False):
         super().__init__()
         self.align_corners = align_corners
         self.padding_mode = padding_mode
+        self.field_space = field_space
+        self.value_scale = float(value_scale)
+        self.zr_a = float(zr_a)
+        self.zr_b = float(zr_b)
+        self.stop_gradient = bool(stop_gradient)
+
+    def warp(self, field, flow, field_space=None, padding_mode=None):
+        return warp_field(
+            field, flow,
+            field_space=self.field_space if field_space is None else field_space,
+            value_scale=self.value_scale, zr_a=self.zr_a, zr_b=self.zr_b,
+            align_corners=self.align_corners,
+            padding_mode=self.padding_mode if padding_mode is None else padding_mode)
 
     def forward(self, initial_field, incremental_flow, source=None):
         if incremental_flow.ndim != 5 or incremental_flow.shape[2] != 2:
@@ -49,9 +92,8 @@ class EvolutionOperator(nn.Module):
         current = initial_field
         predictions, advected_fields = [], []
         for step in range(incremental_flow.shape[1]):
-            advected = backward_warp(
-                current, incremental_flow[:, step], self.align_corners,
-                self.padding_mode)
+            transport_input = current.detach() if self.stop_gradient else current
+            advected = self.warp(transport_input, incremental_flow[:, step])
             current = advected if source is None else advected + source[:, step]
             advected_fields.append(advected)
             predictions.append(current)

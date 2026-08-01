@@ -46,7 +46,13 @@ class EvolutionConvLSTM_Model(nn.Module):
         self.max_displacement = float(getattr(configs, 'evolution_max_displacement', 2.0))
         self.operator = EvolutionOperator(
             align_corners=bool(getattr(configs, 'evolution_align_corners', True)),
-            padding_mode=getattr(configs, 'evolution_padding_mode', 'zeros'))
+            padding_mode=getattr(configs, 'evolution_padding_mode', 'zeros'),
+            field_space=getattr(configs, 'evolution_field_space', 'normalized_dbz'),
+            value_scale=float(getattr(configs, 'radar_value_scale', 50.0)),
+            zr_a=float(getattr(configs, 'zr_a', 200.0)),
+            zr_b=float(getattr(configs, 'zr_b', 1.6)),
+            stop_gradient=bool(getattr(
+                configs, 'evolution_stop_gradient', False)))
 
     def _patchify(self, frames):
         batch, time, channels, height, width = frames.shape
