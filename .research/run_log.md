@@ -1,5 +1,49 @@
 # Research workspace run log
 
+## 2026-08-01 - R4-b five-epoch continuation from C
+
+- Initialized the full rain-rate/no-stop C model from its 0.642496 checkpoint
+  and ran a fresh five-epoch OneCycle under the original two-epoch encoder
+  freeze protocol.
+- Validation CSI followed 0.660787, 0.639803, 0.587591, 0.602436, 0.614035.
+  Epoch 0 proves limited additional optimization headroom, while the later
+  decline shows that restarting the original peak learning rates is too
+  aggressive for the converged model.
+- The epoch-0 checkpoint improved recursive CSI16/32 to 0.22428/0.10987, but
+  its teacher-forced rain-rate flow remained below zero flow for CSI, FSS,
+  centroid error, and strong-rain area. R4-c remains no-go.
+- Analysis: `.research/history/r4b_rain_nostop_ft5ep_analysis.md`.
+- Artifacts: `work_dirs/bth_r4b_rain_nostop_ft5ep_from0642496_seed0/` and
+  `work_dirs/bth_r4b_rain_nostop_ft_ep0_motiondiag/`.
+
+## 2026-08-01 - R4-b rain-rate/no-stop full motion gate
+
+- Evaluated the epoch-4 best checkpoint of the 2x2 winner on all 932 frozen
+  validation windows with the full precipitation/spatial/object/event protocol.
+- Rain-rate/no-stop modestly improved rollout CSI, RMSE, FSS, centroid error,
+  object POD, and object FAR over normalized-dBZ/no-stop, but strong-rain area
+  and energy retention deteriorated further.
+- In the strict teacher-forced comparison, predicted rain-rate flow reduced
+  continuous error but was worse than zero flow for CSI16/32, FSS16/32,
+  centroid error, and thresholded area retention. The motion gate remains
+  failed, so R4-c is not authorized.
+- Full report:
+  `.research/history/r4b_rain_nostop_full_motion_analysis.md`.
+- Artifacts remain under `work_dirs/bth_r4b_rain_nostop_best_valdiag/` and
+  `work_dirs/bth_r4b_rain_nostop_motiondiag/`.
+
+## 2026-08-01 — R4-b warp-space x stop-gradient 2x2 training ablation
+
+- Completed three controlled five-epoch runs that, together with the original
+  R4-b run, form a normalized-dBZ/rain-rate x no-stop/stop-gradient 2x2 design.
+- Rain-rate/no-stop achieved the best validation precipitation score (0.642496)
+  and improved first-hour CSI16/32, FAR, and intensity retention over the
+  normalized-dBZ/no-stop run.
+- Stop-gradient reduced validation precipitation score in both variable spaces,
+  despite slightly improving normalized-dBZ val loss, and is rejected as the
+  current default.
+- Training analysis: `.research/history/r4b_warp_stopgrad_2x2_training_analysis.md`.
+
 ## 2026-08-01 — R4-b pretrained motion-only diagnostic
 
 - Completed a 5-epoch seed-0 learned motion-only run initialized from the

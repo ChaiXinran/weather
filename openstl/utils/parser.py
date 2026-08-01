@@ -73,6 +73,15 @@ def create_parser():
     parser.add_argument(
         '--evolution_stop_gradient', action='store_true', default=False,
         help='Detach the evolved field between successive evolution steps')
+    parser.add_argument(
+        '--evolution_freeze_encoder_epochs', default=None, type=int,
+        help='Number of initial epochs that freeze the evolution encoder')
+    parser.add_argument(
+        '--evolution_encoder_lr', default=None, type=float,
+        help='Maximum learning rate for the evolution history encoder')
+    parser.add_argument(
+        '--evolution_head_lr', default=None, type=float,
+        help='Maximum learning rate for the evolution motion head')
     parser.add_argument('--drop', type=float, default=0.0, help='Dropout rate(default: 0.)')
     parser.add_argument('--drop_path', type=float, default=0.0, help='Drop path rate for SimVP (default: 0.)')
     parser.add_argument('--overwrite', action='store_true', default=False,
@@ -161,6 +170,9 @@ def default_parser():
         'config_file': None,
         'model_type': 'gSTA',
         'evolution_encoder_checkpoint': None,
+        'evolution_freeze_encoder_epochs': None,
+        'evolution_encoder_lr': None,
+        'evolution_head_lr': None,
         'evolution_field_space': None,
         'evolution_stop_gradient': False,
         'drop': 0,
