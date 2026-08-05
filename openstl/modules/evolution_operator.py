@@ -91,6 +91,9 @@ class EvolutionOperator(nn.Module):
         self.zr_a = float(zr_a)
         self.zr_b = float(zr_b)
         self.stop_gradient = bool(stop_gradient)
+        self.max_rain = float(
+            (10.0 ** (self.value_scale / 10.0) / self.zr_a)
+            ** (1.0 / self.zr_b))
 
     def warp(self, field, flow, field_space=None, padding_mode=None):
         return warp_field(
@@ -99,6 +102,50 @@ class EvolutionOperator(nn.Module):
             value_scale=self.value_scale, zr_a=self.zr_a, zr_b=self.zr_b,
             align_corners=self.align_corners,
             padding_mode=self.padding_mode if padding_mode is None else padding_mode)
+
+    def bounded_source(self, advected_rain, source_logit, source_max_rain):
+        """Map one signed logit to a physically representable rain tendency."""
+        if self.field_space != 'rain_rate':
+            raise ValueError(
+                'bounded physical source requires field_space="rain_rate"')
+        if advected_rain.shape != source_logit.shape:
+            raise ValueError('advected_rain and source_logit must share shape')
+        source_max_rain = float(source_max_rain)
+        if source_max_rain <= 0:
+            raise ValueError('source_max_rain must be positive')
+        tendency = torch.tanh(source_logit)
+        positive_capacity = torch.minimum(
+            torch.full_like(advected_rain, source_max_rain),
+            (self.max_rain - advected_rain).clamp_min(0.0))
+        source = torch.where(
+            tendency >= 0.0,
+            positive_capacity * tendency,
+            advected_rain * tendency)
+        return source, tendency, positive_capacity
+
+    def evolve_bounded_step(self, field, flow, source_logit,
+                            source_max_rain):
+        """Advect and apply one bounded source step without output clamping."""
+        transport_input = field.detach() if self.stop_gradient else field
+        advected = self.warp(transport_input, flow)
+        advected_rain = normalized_dbz_to_rain(
+            advected, value_scale=self.value_scale,
+            zr_a=self.zr_a, zr_b=self.zr_b)
+        source, tendency, positive_capacity = self.bounded_source(
+            advected_rain, source_logit, source_max_rain)
+        evolved_rain = advected_rain + source
+        evolved = rain_to_normalized_dbz(
+            evolved_rain, value_scale=self.value_scale,
+            zr_a=self.zr_a, zr_b=self.zr_b)
+        return {
+            'prediction': evolved,
+            'advected': advected,
+            'advected_rain': advected_rain,
+            'source_rain': source,
+            'source_tendency': tendency,
+            'source_positive_capacity': positive_capacity,
+            'evolved_rain': evolved_rain,
+        }
 
     def forward(self, initial_field, incremental_flow, source=None):
         if incremental_flow.ndim != 5 or incremental_flow.shape[2] != 2:

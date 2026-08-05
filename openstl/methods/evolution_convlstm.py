@@ -36,32 +36,45 @@ class EvolutionConvLSTM(Base_method):
 
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
+        source_only = bool(self.hparams.get('evolution_source_only', False))
         frozen = self.current_epoch < int(self.hparams.get(
             'evolution_freeze_encoder_epochs', 0))
         for parameter in self.model.cell_list.parameters():
-            parameter.requires_grad_(not frozen)
+            parameter.requires_grad_(not (source_only or frozen))
         motion_frozen = self.current_epoch < int(self.hparams.get(
             'evolution_freeze_motion_epochs', 0) or 0)
         for parameter in self.model.motion_head.parameters():
-            parameter.requires_grad_(not motion_frozen)
+            parameter.requires_grad_(not (source_only or motion_frozen))
 
     def configure_optimizers(self):
-        encoder_lr = float(self.hparams.get('evolution_encoder_lr', self.hparams.lr))
-        head_lr = float(self.hparams.get('evolution_head_lr', self.hparams.lr))
-        parameter_groups = [
-            {'params': self.model.cell_list.parameters(), 'lr': encoder_lr},
-            {'params': self.model.motion_head.parameters(), 'lr': head_lr},
-        ]
-        max_lrs = [encoder_lr, head_lr]
-        if getattr(self.model, 'use_flow_gate', False):
+        source_only = bool(self.hparams.get('evolution_source_only', False))
+        if source_only:
+            if not getattr(self.model, 'use_source', False):
+                raise ValueError('evolution_source_only requires a source model')
+            source_lr = float(
+                self.hparams.get('evolution_source_lr') or self.hparams.lr)
+            parameter_groups = [
+                {'params': self.model.source_parameters(), 'lr': source_lr}]
+            max_lrs = [source_lr]
+        else:
+            encoder_lr = float(
+                self.hparams.get('evolution_encoder_lr') or self.hparams.lr)
+            head_lr = float(
+                self.hparams.get('evolution_head_lr') or self.hparams.lr)
+            parameter_groups = [
+                {'params': self.model.cell_list.parameters(), 'lr': encoder_lr},
+                {'params': self.model.motion_head.parameters(), 'lr': head_lr},
+            ]
+            max_lrs = [encoder_lr, head_lr]
+        if getattr(self.model, 'use_flow_gate', False) and not source_only:
             gate_lr = float(self.hparams.get('evolution_gate_lr') or head_lr)
             parameter_groups.append({
                 'params': self.model.flow_gate_head.parameters(), 'lr': gate_lr})
             max_lrs.append(gate_lr)
-        if getattr(self.model, 'use_source', False):
+        if getattr(self.model, 'use_source', False) and not source_only:
             source_lr = float(self.hparams.get('evolution_source_lr') or head_lr)
             parameter_groups.append({
-                'params': self.model.source_head.parameters(), 'lr': source_lr})
+                'params': self.model.source_parameters(), 'lr': source_lr})
             max_lrs.append(source_lr)
         optimizer = torch.optim.Adam(
             parameter_groups, weight_decay=float(self.hparams.weight_decay))
@@ -116,8 +129,114 @@ class EvolutionConvLSTM(Base_method):
         return ((error * weights).sum() / weights.sum().clamp_min(1.0),
                 oracle_gate, weights)
 
+    @staticmethod
+    def _masked_mean(values, mask):
+        weights = mask.to(values.dtype)
+        return (values * weights).sum() / weights.sum().clamp_min(1.0)
+
+    @staticmethod
+    def _pixel_weighted_state_loss(error, active, mask16, mask32,
+                                   increment16=1.0, increment32=1.0,
+                                   max_weight=3.0):
+        weights = active.to(error.dtype)
+        weights = weights + float(increment16) * mask16.to(error.dtype)
+        weights = weights + float(increment32) * mask32.to(error.dtype)
+        weights = weights.clamp_max(float(max_weight))
+        loss = (error * weights).sum() / weights.sum().clamp_min(1.0)
+        return loss, weights
+
+    def _bounded_state_terms(self, result, batch_y):
+        batch_y = batch_y[:, :result['prediction'].shape[1]]
+        operator = self.model.operator
+        target_rain = normalized_dbz_to_rain(
+            batch_y, value_scale=operator.value_scale,
+            zr_a=operator.zr_a, zr_b=operator.zr_b)
+        error = torch.nn.functional.smooth_l1_loss(
+            result['evolved_rain'], target_rain, reduction='none',
+            beta=float(self.hparams.get('evolution_state_huber_beta', 1.0)))
+        event_rain = torch.maximum(result['advected_rain'].detach(), target_rain)
+        active = event_rain >= float(self.hparams.get(
+            'evolution_source_active_threshold', 0.1))
+        mask16 = event_rain >= 16.0
+        mask32 = event_rain >= 32.0
+        losses = {
+            'state_all': error.mean(),
+            'state_active': self._masked_mean(error, active),
+            'state_16': self._masked_mean(error, mask16),
+            'state_32': self._masked_mean(error, mask32),
+        }
+        loss_mode = str(self.hparams.get(
+            'evolution_state_loss_mode', 'regional'))
+        if loss_mode == 'regional':
+            losses['loss'] = (
+                losses['state_active']
+                + float(self.hparams.get('evolution_state_16_weight', 0.5))
+                * losses['state_16']
+                + float(self.hparams.get('evolution_state_32_weight', 0.5))
+                * losses['state_32'])
+        elif loss_mode == 'pixel_weighted':
+            losses['loss'], weights = self._pixel_weighted_state_loss(
+                error, active, mask16, mask32,
+                increment16=self.hparams.get(
+                    'evolution_pixel_16_increment', 1.0),
+                increment32=self.hparams.get(
+                    'evolution_pixel_32_increment', 1.0),
+                max_weight=self.hparams.get(
+                    'evolution_pixel_max_weight', 3.0))
+            losses['pixel_weight_mean'] = self._masked_mean(weights, active)
+        else:
+            raise ValueError(
+                'evolution_state_loss_mode must be regional or pixel_weighted')
+
+        with torch.no_grad():
+            source = result['source_rain']
+            oracle = target_rain - result['advected_rain']
+            threshold = float(self.hparams.get(
+                'evolution_source_sign_threshold', 0.1))
+            growth = oracle > threshold
+            decay = oracle < -threshold
+            eps = source.new_tensor(1e-6)
+            for name, mask in (
+                    ('active', active), ('16', mask16), ('32', mask32),
+                    ('growth', growth), ('decay', decay)):
+                predicted_scale = self._masked_mean(source.abs(), mask)
+                oracle_scale = self._masked_mean(oracle.abs(), mask)
+                losses[f'source_abs_{name}_mm_h'] = predicted_scale
+                losses[f'source_scale_ratio_{name}'] = (
+                    predicted_scale / (oracle_scale + eps))
+            losses['source_growth_sign_accuracy'] = self._masked_mean(
+                (source > 0).to(source.dtype), growth)
+            losses['source_decay_sign_accuracy'] = self._masked_mean(
+                (source < 0).to(source.dtype), decay)
+            losses['source_positive_fraction'] = (source > 0).float().mean()
+            losses['source_negative_fraction'] = (source < 0).float().mean()
+            capacity = result['source_positive_capacity']
+            losses['source_positive_capacity_fraction'] = (
+                (capacity < self.model.source_max_rain - 1e-4).float().mean())
+            losses['source_positive_saturation_fraction'] = (
+                (source > 0.99 * capacity.clamp_min(1e-6)).float().mean())
+            losses['source_sink_clear_fraction'] = (
+                result['evolved_rain'] <= 1e-6).float().mean()
+            losses['evolved_above_rmax_fraction'] = (
+                result['evolved_rain'] > operator.max_rain + 1e-5).float().mean()
+            losses['normalized_dbz_at_upper_bound_fraction'] = (
+                result['prediction'] >= 1.0 - 1e-6).float().mean()
+        return losses
+
+    def _bounded_source_training_step(self, batch_x, batch_y):
+        result = self.model(
+            batch_x, return_aux=True, teacher_forcing=batch_y)
+        values = self._bounded_state_terms(result, batch_y)
+        for name, value in values.items():
+            self.log(f'train_{name}', value, on_step=name == 'loss',
+                     on_epoch=True, prog_bar=name == 'loss')
+        return values['loss']
+
     def training_step(self, batch, batch_idx):
         batch_x, batch_y = batch
+        if (getattr(self.model, 'use_source', False)
+                and self.model.source_parameterization == 'bounded_state'):
+            return self._bounded_source_training_step(batch_x, batch_y)
         result = self.model(batch_x, return_aux=True)
         forecast_loss = self.criterion(result['prediction'], batch_y)
 
@@ -229,3 +348,31 @@ class EvolutionConvLSTM(Base_method):
         for name, value in getattr(self.criterion, 'last_components', {}).items():
             self.log(f'train_{name}', value, on_step=False, on_epoch=True)
         return loss
+
+    def validation_step(self, batch, batch_idx):
+        if (getattr(self.model, 'use_source', False)
+                and self.model.source_parameterization == 'bounded_state'):
+            batch_x, batch_y = batch
+            steps = self.model.forecast_steps
+            target = batch_y[:, :steps]
+            if steps == 1:
+                result = self.model(batch_x, return_aux=True)
+                loss = self.validation_criterion(
+                    result['prediction'], target)
+            else:
+                prediction = self.model(batch_x)
+                loss = self.validation_criterion(prediction, target)
+                result = self.model(
+                    batch_x, return_aux=True, teacher_forcing=batch_y)
+            self.log('val_loss', loss, on_step=True, on_epoch=True,
+                     prog_bar=False)
+            if self.hparams.dataname == 'bth_radar':
+                self._update_val_precipitation(
+                    result['prediction'] if steps == 1 else prediction,
+                    target)
+            values = self._bounded_state_terms(result, target)
+            for name, value in values.items():
+                self.log(f'val_tf_{name}', value, on_step=False,
+                         on_epoch=True, prog_bar=False)
+            return loss
+        return super().validation_step(batch, batch_idx)

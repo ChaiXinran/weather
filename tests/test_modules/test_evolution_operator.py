@@ -95,3 +95,31 @@ def test_physical_source_rejects_non_rain_rate_operator():
         assert 'rain_rate' in str(error)
     else:
         raise AssertionError('Expected a rain-rate source unit validation error')
+
+
+def test_bounded_source_respects_sink_and_representable_upper_limit():
+    operator = EvolutionOperator(field_space='rain_rate')
+    advected = torch.tensor([[[[0.0, 10.0, 40.0, operator.max_rain]]]])
+    logits = torch.tensor([[[[-20.0, -20.0, 20.0, 20.0]]]])
+    source, tendency, capacity = operator.bounded_source(
+        advected, logits, source_max_rain=35.0)
+    evolved = advected + source
+    assert torch.all(source >= -advected)
+    assert torch.all(source <= capacity)
+    assert torch.all(evolved >= 0.0)
+    assert torch.all(evolved <= operator.max_rain + 1e-5)
+    torch.testing.assert_close(evolved[0, 0, 0, :2], torch.zeros(2))
+    torch.testing.assert_close(evolved[0, 0, 0, -1],
+                               torch.tensor(operator.max_rain))
+    assert tendency.min() < 0 and tendency.max() > 0
+
+
+def test_bounded_source_has_gradients_on_both_signed_branches():
+    operator = EvolutionOperator(field_space='rain_rate')
+    advected = torch.full((1, 1, 2, 2), 10.0)
+    logits = torch.tensor([[[[-0.2, -0.1], [0.1, 0.2]]]],
+                          requires_grad=True)
+    source, _, _ = operator.bounded_source(advected, logits, 35.0)
+    source.sum().backward()
+    assert torch.all(torch.isfinite(logits.grad))
+    assert torch.all(logits.grad != 0)

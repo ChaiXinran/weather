@@ -11,3 +11,13 @@ def test_bth_evolution_motion_config_is_motion_only():
     assert config['evolution_freeze_encoder_epochs'] == 2
     assert config['evolution_encoder_lr'] < config['evolution_head_lr']
     assert method_maps['evolutionconvlstm'] is method_maps['evolution_convlstm']
+
+
+def test_single_step_source_config_is_an_explicit_rollback():
+    config = load_config(
+        'configs/bth_radar/ConvLSTM_evolution_source_s1_pixel_weighted.py')
+    assert config['evolution_forecast_steps'] == 1
+    assert config['evolution_state_loss_mode'] == 'pixel_weighted'
+    assert config['evolution_pixel_16_increment'] == 1.0
+    assert config['evolution_pixel_32_increment'] == 1.0
+    assert config['evolution_pixel_max_weight'] == 3.0
