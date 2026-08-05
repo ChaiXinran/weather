@@ -57,6 +57,21 @@ class EvolutionConvLSTM_Model(nn.Module):
             nn.init.constant_(
                 self.flow_gate_head[-1].bias,
                 torch.logit(torch.tensor(initial_gate)).item())
+        self.use_source = bool(getattr(configs, 'evolution_use_source', False))
+        if self.use_source:
+            self.source_head = nn.Sequential(
+                nn.Conv2d(num_hidden[-1], head_channels, 3, padding=1),
+                nn.GroupNorm(groups, head_channels), nn.SiLU(),
+                nn.Conv2d(head_channels, head_channels, 3, padding=1), nn.SiLU(),
+                nn.Conv2d(
+                    head_channels,
+                    configs.aft_seq_length * channels, 1))
+            nn.init.zeros_(self.source_head[-1].weight)
+            nn.init.zeros_(self.source_head[-1].bias)
+            self.source_max_rain = float(
+                getattr(configs, 'evolution_source_max_rain', 35.0))
+            if self.source_max_rain <= 0:
+                raise ValueError('evolution_source_max_rain must be positive')
         self.max_displacement = float(getattr(configs, 'evolution_max_displacement', 2.0))
         self.operator = EvolutionOperator(
             align_corners=bool(getattr(configs, 'evolution_align_corners', True)),
@@ -108,9 +123,21 @@ class EvolutionConvLSTM_Model(nn.Module):
             flow_gate = raw_flow.new_ones(
                 batch, self.configs.aft_seq_length, 1, height, width)
         flow = raw_flow * flow_gate
-        result = self.operator(history[:, -1], flow)
+        raw_source = None
+        source_rain = None
+        if self.use_source:
+            raw_source = self.source_head(feature)
+            raw_source = F.interpolate(
+                raw_source, size=(height, width), mode='bilinear',
+                align_corners=False)
+            raw_source = raw_source.reshape(
+                batch, self.configs.aft_seq_length,
+                history.shape[2], height, width)
+            source_rain = self.source_max_rain * torch.tanh(raw_source)
+        result = self.operator(history[:, -1], flow, source=source_rain)
         result['raw_flow'] = raw_flow
         result['flow_gate'] = flow_gate
+        result['raw_source'] = raw_source
         return result if return_aux else result['prediction']
 
     def load_pretrained_motion(self, checkpoint_path):

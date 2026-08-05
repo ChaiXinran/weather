@@ -1,7 +1,9 @@
 # Copyright (c) CAIRI AI Lab. All rights reserved
 
 from .convlstm_modules import ConvLSTMCell
-from .evolution_operator import EvolutionOperator, backward_warp, warp_field
+from .evolution_operator import (EvolutionOperator, backward_warp,
+                                 normalized_dbz_to_rain,
+                                 rain_to_normalized_dbz, warp_field)
 from .e3dlstm_modules import Eidetic3DLSTMCell, tf_Conv3d
 from .mim_modules import MIMBlock, MIMN
 from .mau_modules import MAUCell
@@ -18,7 +20,9 @@ from .mmvp_modules import (ResBlock, RRDB, ResidualDenseBlock_4C, Up, Conv3D, Co
 from .swinlstm_modules import UpSample, DownSample, STconvert
 
 __all__ = [
-    'ConvLSTMCell', 'EvolutionOperator', 'backward_warp', 'warp_field', 'CausalLSTMCell', 'GHU', 'SpatioTemporalLSTMCell', 'SpatioTemporalLSTMCellv2',
+    'ConvLSTMCell', 'EvolutionOperator', 'backward_warp', 'warp_field',
+    'normalized_dbz_to_rain', 'rain_to_normalized_dbz',
+    'CausalLSTMCell', 'GHU', 'SpatioTemporalLSTMCell', 'SpatioTemporalLSTMCellv2',
     'MIMBlock', 'MIMN', 'Eidetic3DLSTMCell', 'tf_Conv3d',
     'PhyCell', 'PhyD_ConvLSTM', 'PhyD_EncoderRNN', 'K2M', 'MAUCell',
     'BasicConv2d', 'ConvSC', 'GroupConv2d',

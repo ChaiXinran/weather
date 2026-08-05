@@ -1,7 +1,7 @@
 import torch
 
 from openstl.models import EvolutionConvLSTM_Model
-from openstl.modules import backward_warp
+from openstl.modules import backward_warp, normalized_dbz_to_rain
 from openstl.utils import print_log
 from .base_method import Base_method
 
@@ -58,6 +58,11 @@ class EvolutionConvLSTM(Base_method):
             parameter_groups.append({
                 'params': self.model.flow_gate_head.parameters(), 'lr': gate_lr})
             max_lrs.append(gate_lr)
+        if getattr(self.model, 'use_source', False):
+            source_lr = float(self.hparams.get('evolution_source_lr') or head_lr)
+            parameter_groups.append({
+                'params': self.model.source_head.parameters(), 'lr': source_lr})
+            max_lrs.append(source_lr)
         optimizer = torch.optim.Adam(
             parameter_groups, weight_decay=float(self.hparams.weight_decay))
         if self.hparams.sched == 'onecycle':
@@ -138,21 +143,86 @@ class EvolutionConvLSTM(Base_method):
             gate_target_mean = ((oracle_gate * gate_weights).sum()
                                 / gate_weights.sum().clamp_min(1.0))
 
+        source_supervision = result['flow'].new_zeros(())
+        source_sparse = result['flow'].new_zeros(())
+        source_tv = result['flow'].new_zeros(())
+        oracle_source_abs_mean = result['flow'].new_zeros(())
+        if getattr(self.model, 'use_source', False):
+            operator = self.model.operator
+            previous_rain = normalized_dbz_to_rain(
+                previous, value_scale=operator.value_scale,
+                zr_a=operator.zr_a, zr_b=operator.zr_b)
+            target_rain = normalized_dbz_to_rain(
+                batch_y, value_scale=operator.value_scale,
+                zr_a=operator.zr_a, zr_b=operator.zr_b)
+            with torch.no_grad():
+                advected_rain = torch.stack([
+                    backward_warp(
+                        previous_rain[:, step], result['flow'][:, step],
+                        align_corners=operator.align_corners,
+                        padding_mode=operator.padding_mode)
+                    for step in range(batch_y.shape[1])
+                ], dim=1)
+                oracle_source = target_rain - advected_rain
+                event_rain = torch.maximum(previous_rain, target_rain)
+                active_threshold = float(self.hparams.get(
+                    'evolution_source_active_threshold', 0.1))
+                active = ((event_rain >= active_threshold)
+                          | (oracle_source.abs() >= active_threshold))
+                weights = active.float()
+                weights = weights + active * 2.0 * (event_rain >= 16.0).float()
+                weights = weights + active * 4.0 * (event_rain >= 32.0).float()
+                weights = weights + active * (oracle_source.abs() >= 0.5).float()
+            source_scale = self.model.source_max_rain
+            source_error = torch.nn.functional.smooth_l1_loss(
+                result['source_rain'] / source_scale,
+                oracle_source / source_scale,
+                reduction='none', beta=float(self.hparams.get(
+                    'evolution_source_huber_beta', 0.03)))
+            source_supervision = ((source_error * weights).sum()
+                                  / weights.sum().clamp_min(1.0))
+            normalized_source = result['source_rain'] / source_scale
+            source_sparse = normalized_source.abs().mean()
+            source_tv = self._spatial_smoothness(normalized_source)
+            if normalized_source.shape[1] > 1:
+                source_tv = source_tv + (
+                    normalized_source[:, 1:] - normalized_source[:, :-1]
+                ).abs().mean()
+            oracle_source_abs_mean = oracle_source.abs().mean()
+
         if bool(self.hparams.get('evolution_gate_supervision_only', False)):
             loss = gate_supervision
+        elif bool(self.hparams.get('evolution_source_supervision_only', False)):
+            loss = (source_supervision
+                    + float(self.hparams.get(
+                        'evolution_source_sparse_weight', 0.01)) * source_sparse
+                    + float(self.hparams.get(
+                        'evolution_source_tv_weight', 0.001)) * source_tv)
         else:
             loss = (forecast_loss
                     + float(self.hparams.get('evolution_tf_weight', 0.5)) * tf_loss
                     + float(self.hparams.get('evolution_spatial_weight', 1e-3)) * spatial_loss
                     + float(self.hparams.get('evolution_temporal_weight', 1e-3)) * temporal_loss
                     + float(self.hparams.get(
-                        'evolution_gate_supervision_weight') or 0.0) * gate_supervision)
+                        'evolution_gate_supervision_weight') or 0.0) * gate_supervision
+                    + float(self.hparams.get(
+                        'evolution_source_supervision_weight') or 0.0) * source_supervision
+                    + float(self.hparams.get(
+                        'evolution_source_sparse_weight') or 0.0) * source_sparse
+                    + float(self.hparams.get(
+                        'evolution_source_tv_weight') or 0.0) * source_tv)
         values = {'loss': loss, 'forecast': forecast_loss, 'transport': tf_loss,
                   'flow_spatial': spatial_loss, 'flow_temporal': temporal_loss}
         if getattr(self.model, 'use_flow_gate', False):
             values['gate_mean'] = result['flow_gate'].mean()
             values['gate_supervision'] = gate_supervision
             values['gate_target_mean'] = gate_target_mean
+        if getattr(self.model, 'use_source', False):
+            values['source_supervision'] = source_supervision
+            values['source_sparse'] = source_sparse
+            values['source_tv'] = source_tv
+            values['source_abs_mean_mm_h'] = result['source_rain'].abs().mean()
+            values['oracle_source_abs_mean_mm_h'] = oracle_source_abs_mean
         for name, value in values.items():
             self.log(f'train_{name}', value, on_step=name == 'loss', on_epoch=True,
                      prog_bar=name == 'loss')

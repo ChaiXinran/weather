@@ -37,6 +37,26 @@ def test_evolution_flow_gate_starts_at_configured_scale():
     torch.testing.assert_close(result['flow'], result['raw_flow'] * 0.5)
 
 
+def test_source_head_zero_initialization_exactly_preserves_motion_only_output():
+    config = _config()
+    config.evolution_field_space = 'rain_rate'
+    baseline = EvolutionConvLSTM_Model(2, [4, 4], config)
+    source_config = _config()
+    source_config.evolution_field_space = 'rain_rate'
+    source_config.evolution_use_source = True
+    source_config.evolution_source_max_rain = 35.0
+    source_model = EvolutionConvLSTM_Model(2, [4, 4], source_config)
+    source_model.load_state_dict(baseline.state_dict(), strict=False)
+    history = torch.rand(2, 3, 1, 8, 10)
+    expected = baseline(history, return_aux=True)
+    result = source_model(history, return_aux=True)
+    torch.testing.assert_close(result['prediction'], expected['prediction'])
+    torch.testing.assert_close(
+        result['source_rain'], torch.zeros_like(result['source_rain']))
+    assert result['source_rain'].shape == (2, 4, 1, 8, 10)
+    assert result['advected_rain'].shape == result['source_rain'].shape
+
+
 def test_encoder_only_checkpoint_loading_excludes_direct_image_head(tmp_path):
     config = _config()
     baseline = ConvLSTM_Model(2, [4, 4], config)

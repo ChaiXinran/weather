@@ -3,6 +3,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def normalized_dbz_to_rain(field, value_scale=50.0, zr_a=200.0, zr_b=1.6):
+    """Convert a normalized dBZ tensor to rain rate in mm/h."""
+    dbz = field * float(value_scale)
+    linear_z = torch.pow(10.0, dbz / 10.0)
+    return torch.pow(linear_z / float(zr_a), 1.0 / float(zr_b))
+
+
+def rain_to_normalized_dbz(rain, value_scale=50.0, zr_a=200.0,
+                           zr_b=1.6, eps=1e-6):
+    """Convert rain rate in mm/h to the normalized dBZ model field."""
+    linear_z = float(zr_a) * torch.pow(rain.clamp_min(0.0), float(zr_b))
+    dbz = 10.0 * torch.log10(linear_z.clamp_min(eps))
+    return (dbz / float(value_scale)).clamp(0.0, 1.0)
+
+
 def backward_warp(field, flow, align_corners=True, padding_mode='zeros'):
     """Warp ``field`` by a flow in pixels.
 
@@ -49,12 +64,13 @@ def warp_field(field, flow, field_space='normalized_dbz', value_scale=50.0,
             padding_mode=padding_mode)
         warped_dbz = 10.0 * torch.log10(warped.clamp_min(eps))
     elif field_space == 'rain_rate':
-        rain_rate = torch.pow(linear_z / float(zr_a), 1.0 / float(zr_b))
+        rain_rate = normalized_dbz_to_rain(
+            field, value_scale=value_scale, zr_a=zr_a, zr_b=zr_b)
         warped = backward_warp(
             rain_rate, flow, align_corners=align_corners,
             padding_mode=padding_mode)
-        warped_z = float(zr_a) * torch.pow(warped.clamp_min(eps), float(zr_b))
-        warped_dbz = 10.0 * torch.log10(warped_z.clamp_min(eps))
+        return rain_to_normalized_dbz(
+            warped, value_scale=value_scale, zr_a=zr_a, zr_b=zr_b, eps=eps)
     else:
         raise ValueError(
             'field_space must be normalized_dbz, linear_z, or rain_rate')
@@ -87,14 +103,56 @@ class EvolutionOperator(nn.Module):
     def forward(self, initial_field, incremental_flow, source=None):
         if incremental_flow.ndim != 5 or incremental_flow.shape[2] != 2:
             raise ValueError('incremental_flow must be [B,T,2,H,W]')
-        if source is not None and source.shape[:2] != incremental_flow.shape[:2]:
-            raise ValueError('source and flow time dimensions must match')
+        if source is not None:
+            expected = (incremental_flow.shape[0], incremental_flow.shape[1],
+                        initial_field.shape[1], *initial_field.shape[-2:])
+            if tuple(source.shape) != expected:
+                raise ValueError(f'source must have shape {expected}')
+            if self.field_space != 'rain_rate':
+                raise ValueError(
+                    'physical source is supported only when field_space="rain_rate"')
+
+        # Preserve the already validated R4-b path bit-for-bit when no source
+        # is supplied. The physical-state branch below is activated only by an
+        # explicit rain-rate source tensor.
+        if source is None:
+            current = initial_field
+            predictions, advected_fields = [], []
+            for step in range(incremental_flow.shape[1]):
+                transport_input = current.detach() if self.stop_gradient else current
+                advected = self.warp(transport_input, incremental_flow[:, step])
+                current = advected
+                advected_fields.append(advected)
+                predictions.append(current)
+            return {
+                'prediction': torch.stack(predictions, dim=1),
+                'advected': torch.stack(advected_fields, dim=1),
+                'flow': incremental_flow,
+                'source': None,
+                'advected_rain': None,
+                'source_rain': None,
+                'evolved_rain': None,
+            }
+
         current = initial_field
         predictions, advected_fields = [], []
+        advected_rain_fields, evolved_rain_fields = [], []
         for step in range(incremental_flow.shape[1]):
             transport_input = current.detach() if self.stop_gradient else current
+            # self.warp performs advection in rain-rate space. Convert its
+            # normalized-dBZ transport result back to rain before adding the
+            # physical residual; retaining this boundary round-trip makes a
+            # zero-initialized source exactly compatible with R4-b.
             advected = self.warp(transport_input, incremental_flow[:, step])
-            current = advected if source is None else advected + source[:, step]
+            advected_rain = normalized_dbz_to_rain(
+                advected, value_scale=self.value_scale,
+                zr_a=self.zr_a, zr_b=self.zr_b)
+            current_rain = (advected_rain + source[:, step]).clamp_min(0.0)
+            current = rain_to_normalized_dbz(
+                current_rain, value_scale=self.value_scale,
+                zr_a=self.zr_a, zr_b=self.zr_b)
+            advected_rain_fields.append(advected_rain)
+            evolved_rain_fields.append(current_rain)
             advected_fields.append(advected)
             predictions.append(current)
         return {
@@ -102,4 +160,7 @@ class EvolutionOperator(nn.Module):
             'advected': torch.stack(advected_fields, dim=1),
             'flow': incremental_flow,
             'source': source,
+            'advected_rain': torch.stack(advected_rain_fields, dim=1),
+            'source_rain': source,
+            'evolved_rain': torch.stack(evolved_rain_fields, dim=1),
         }

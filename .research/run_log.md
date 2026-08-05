@@ -161,3 +161,19 @@
   .00923 vs .05439. Stop identical continuation and retain it as the best clean
   motion-only scale-0.5 checkpoint.
 - Report: `.research/history/r4b_motion_rainrate_scale05_5ep_analysis.md`.
+## 2026-08-05 - R4-c0 oracle source and R4-c1 frozen-motion source head
+
+- Refactored the evolution operator so signed source is added in rain-rate
+  space and returned separately from advected/evolved rain; source-free R4-b
+  compatibility and zero-source initialization passed ten targeted checks.
+- Audited oracle source on 11,245 train and 932 validation windows using the
+  frozen `.640662` motion checkpoint. Train/val absolute P99 is 27.32/27.23
+  mm/h in 16-mm/h regions and 33.35/32.30 in 32-mm/h regions.
+- Set `Smax=35 mm/h` from training extreme-rain P99, with validation used only
+  as independent confirmation.
+- Ran two three-epoch frozen-motion source-head experiments. Both stayed near
+  zero source; the active-weight rerun peaked at `.641226` and did not reduce
+  direct source loss. POD32/Bias32 did not recover.
+- R4-c0 passes but R4-c1 fails its mechanism gate. Do not enter joint R4-c2;
+  next isolate direct active oracle-source pretraining.
+- Report: `.research/history/r4c0_r4c1_source_analysis.md`.
