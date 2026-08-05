@@ -1,0 +1,11 @@
+All content is derived from internal repository research records.
+Primary sources:
+- .research/run_log.md
+- .research/history/r2_ablation_results.md
+- .research/history/r3_selected_epoch03_analysis.md
+- .research/history/convlstm_r2d_ft_checkpoint_analysis.md
+- .research/history/r4b_motion_pre0788_5ep_analysis.md
+- .research/history/r4b_flow_scale_persistent_object_diagnostic.md
+- .research/history/r4a_r4b2_motion_gate_analysis.md
+- .research/history/r4b_motion_rainrate_scale05_5ep_analysis.md
+No external visual assets were used.

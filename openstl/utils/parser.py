@@ -82,6 +82,30 @@ def create_parser():
     parser.add_argument(
         '--evolution_head_lr', default=None, type=float,
         help='Maximum learning rate for the evolution motion head')
+    parser.add_argument(
+        '--evolution_use_flow_gate', action='store_true', default=False,
+        help='Apply a learned spatial confidence gate to raw evolution flow')
+    parser.add_argument(
+        '--evolution_motion_checkpoint', default=None, type=str,
+        help='Initialize evolution encoder and raw motion head from a checkpoint')
+    parser.add_argument(
+        '--evolution_freeze_motion_epochs', default=None, type=int,
+        help='Number of initial epochs that freeze the raw motion head')
+    parser.add_argument(
+        '--evolution_gate_lr', default=None, type=float,
+        help='Maximum learning rate for the evolution flow gate')
+    parser.add_argument(
+        '--evolution_gate_initial', default=None, type=float,
+        help='Initial sigmoid value for a newly created evolution flow gate')
+    parser.add_argument(
+        '--evolution_gate_supervision_weight', default=None, type=float,
+        help='Weight of teacher-forced oracle-scale supervision for the gate')
+    parser.add_argument(
+        '--evolution_gate_active_threshold', default=None, type=float,
+        help='Minimum rain rate included in oracle gate supervision')
+    parser.add_argument(
+        '--evolution_gate_supervision_only', action='store_true', default=False,
+        help='Train only the oracle gate loss for gate pretraining')
     parser.add_argument('--drop', type=float, default=0.0, help='Dropout rate(default: 0.)')
     parser.add_argument('--drop_path', type=float, default=0.0, help='Drop path rate for SimVP (default: 0.)')
     parser.add_argument('--overwrite', action='store_true', default=False,
@@ -173,6 +197,14 @@ def default_parser():
         'evolution_freeze_encoder_epochs': None,
         'evolution_encoder_lr': None,
         'evolution_head_lr': None,
+        'evolution_use_flow_gate': False,
+        'evolution_motion_checkpoint': None,
+        'evolution_freeze_motion_epochs': None,
+        'evolution_gate_lr': None,
+        'evolution_gate_initial': None,
+        'evolution_gate_supervision_weight': None,
+        'evolution_gate_active_threshold': None,
+        'evolution_gate_supervision_only': False,
         'evolution_field_space': None,
         'evolution_stop_gradient': False,
         'drop': 0,

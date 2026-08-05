@@ -43,6 +43,20 @@ class EvolutionConvLSTM_Model(nn.Module):
             nn.Conv2d(head_channels, configs.aft_seq_length * 2, 1))
         nn.init.zeros_(self.motion_head[-1].weight)
         nn.init.zeros_(self.motion_head[-1].bias)
+        self.use_flow_gate = bool(getattr(configs, 'evolution_use_flow_gate', False))
+        if self.use_flow_gate:
+            self.flow_gate_head = nn.Sequential(
+                nn.Conv2d(num_hidden[-1], head_channels, 3, padding=1),
+                nn.GroupNorm(groups, head_channels), nn.SiLU(),
+                nn.Conv2d(head_channels, configs.aft_seq_length, 1))
+            nn.init.zeros_(self.flow_gate_head[-1].weight)
+            initial_gate = float(
+                getattr(configs, 'evolution_gate_initial', None) or 0.5)
+            if not 0.0 < initial_gate < 1.0:
+                raise ValueError('evolution_gate_initial must be between 0 and 1')
+            nn.init.constant_(
+                self.flow_gate_head[-1].bias,
+                torch.logit(torch.tensor(initial_gate)).item())
         self.max_displacement = float(getattr(configs, 'evolution_max_displacement', 2.0))
         self.operator = EvolutionOperator(
             align_corners=bool(getattr(configs, 'evolution_align_corners', True)),
@@ -81,10 +95,41 @@ class EvolutionConvLSTM_Model(nn.Module):
         raw_flow = self.motion_head(feature)
         raw_flow = F.interpolate(raw_flow, size=(height, width), mode='bilinear',
                                  align_corners=False)
-        flow = raw_flow.reshape(batch, self.configs.aft_seq_length, 2, height, width)
-        flow = self.max_displacement * torch.tanh(flow)
+        raw_flow = raw_flow.reshape(
+            batch, self.configs.aft_seq_length, 2, height, width)
+        raw_flow = self.max_displacement * torch.tanh(raw_flow)
+        if self.use_flow_gate:
+            gate_logits = self.flow_gate_head(feature)
+            gate_logits = F.interpolate(
+                gate_logits, size=(height, width), mode='bilinear',
+                align_corners=False)
+            flow_gate = torch.sigmoid(gate_logits).unsqueeze(2)
+        else:
+            flow_gate = raw_flow.new_ones(
+                batch, self.configs.aft_seq_length, 1, height, width)
+        flow = raw_flow * flow_gate
         result = self.operator(history[:, -1], flow)
+        result['raw_flow'] = raw_flow
+        result['flow_gate'] = flow_gate
         return result if return_aux else result['prediction']
+
+    def load_pretrained_motion(self, checkpoint_path):
+        """Load encoder and raw motion head while leaving a new gate untouched."""
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        state = checkpoint.get('state_dict', checkpoint)
+        prefixes = ('cell_list.', 'motion_head.')
+        extracted = {}
+        for key, value in state.items():
+            local_key = key[len('model.'):] if key.startswith('model.') else key
+            if local_key.startswith(prefixes):
+                extracted[local_key] = value
+        target = {key for key in self.state_dict() if key.startswith(prefixes)}
+        if set(extracted) != target:
+            raise ValueError(
+                f'Incompatible motion checkpoint: missing={sorted(target-set(extracted))}, '
+                f'unexpected={sorted(set(extracted)-target)}')
+        self.load_state_dict(extracted, strict=False)
+        return len(extracted)
 
     def load_pretrained_encoder(self, checkpoint_path):
         checkpoint = torch.load(checkpoint_path, map_location='cpu')

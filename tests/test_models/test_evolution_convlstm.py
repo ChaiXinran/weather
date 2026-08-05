@@ -24,6 +24,19 @@ def test_evolution_model_uses_history_only_and_starts_as_persistence():
         torch.testing.assert_close(result['prediction'][:, step], history[:, -1])
 
 
+def test_evolution_flow_gate_starts_at_configured_scale():
+    config = _config()
+    config.evolution_use_flow_gate = True
+    config.evolution_gate_initial = 0.5
+    model = EvolutionConvLSTM_Model(2, [4, 4], config)
+    history = torch.rand(2, 3, 1, 8, 10)
+    result = model(history, return_aux=True)
+    assert result['flow_gate'].shape == (2, 4, 1, 8, 10)
+    torch.testing.assert_close(
+        result['flow_gate'], torch.full_like(result['flow_gate'], 0.5))
+    torch.testing.assert_close(result['flow'], result['raw_flow'] * 0.5)
+
+
 def test_encoder_only_checkpoint_loading_excludes_direct_image_head(tmp_path):
     config = _config()
     baseline = ConvLSTM_Model(2, [4, 4], config)

@@ -1,0 +1,294 @@
+{"kind":"deck","id":"pr/uhdkzs","name":"Deck"}
+{"kind":"layout","layoutId":"73fde08f-8716-40f2-8f92-f66ef6f6e4a9","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"f12be20a-2838-4ebb-ba8f-5a0eab5c8dea","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/779yos","slide":1,"title":"OPENSTL · WEEKLY PROGRESS","textShapes":6}
+{"kind":"shape","id":"sh/8nm9g3i5","slide":1,"bbox":[0,0,1280,720]}
+{"kind":"shape","id":"sh/7mdsnihk","slide":1,"bbox":[0,0,32,720]}
+{"kind":"textbox","id":"sh/6l4red0z","slide":1,"text":"OPENSTL · WEEKLY PROGRESS","textPreview":"OPENSTL · WEEKLY PROGRESS","textChars":25,"textLines":1,"bbox":[88,86,500,28]}
+{"kind":"textbox","id":"sh/hcfadszm","slide":1,"text":"雷达降水临近预报\n周进展","textPreview":"雷达降水临近预报 | 周进展","textChars":12,"textLines":2,"bbox":[88,160,690,150]}
+{"kind":"shape","id":"sh/grmtknyh","slide":1,"bbox":[88,338,108,6]}
+{"kind":"textbox","id":"sh/vqdsrihw","slide":1,"text":"从强降水评估基线到显式运动建模诊断","textPreview":"从强降水评估基线到显式运动建模诊断","textChars":17,"textLines":1,"bbox":[88,372,700,42]}
+{"kind":"textbox","id":"sh/up4rid0b","slide":1,"text":"2026.07.29 — 2026.08.02","textPreview":"2026.07.29 — 2026.08.02","textChars":23,"textLines":1,"bbox":[88,548,400,28]}
+{"kind":"textbox","id":"sh/xgbahozi","slide":1,"text":"BTH Radar · SimVP · ConvLSTM · Motion Evolution","textPreview":"BTH Radar · SimVP · ConvLSTM · Motion Evolution","textChars":47,"textLines":1,"bbox":[88,584,600,26]}
+{"kind":"shape","id":"sh/wv298jix","slide":1,"bbox":[830,136,310,310]}
+{"kind":"shape","id":"sh/mh8r6dgn","slide":1,"bbox":[878,184,262,262]}
+{"kind":"shape","id":"sh/7ihsfix8","slide":1,"bbox":[926,232,214,214]}
+{"kind":"shape","id":"sh/8jq98nyt","slide":1,"bbox":[974,280,166,166]}
+{"kind":"textbox","id":"sh/9kzahsfe","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"notes","id":"nt/779yos","slide":1,"text":"[Sources]\nInternal project records: .research/run_log.md"}
+{"kind":"slide","id":"sl/qch77e","slide":2,"title":"01 · 本周全景","textShapes":21}
+{"kind":"textbox","id":"sh/xkzmlkba","slide":2,"text":"01 · 本周全景","textPreview":"01 · 本周全景","textChars":9,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/aho3apcz","slide":2,"text":"本周完成了从数据协议到运动诊断的闭环","textPreview":"本周完成了从数据协议到运动诊断的闭环","textChars":18,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/bix4jutk","slide":2,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/of6l8fut","slide":2,"text":"WEEKLY OVERVIEW","textPreview":"WEEKLY OVERVIEW","textChars":15,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/9gfmhkbe","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"shape","id":"sh/mdo365cn","slide":2,"bbox":[126,315,980,4]}
+{"kind":"shape","id":"sh/nexkfat8","slide":2,"bbox":[134,280,34,34]}
+{"kind":"textbox","id":"sh/0r6l4vux","slide":2,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[134,280,34,34]}
+{"kind":"textbox","id":"sh/1cf2d0b2","slide":2,"text":"协议固化","textPreview":"协议固化","textChars":4,"textLines":1,"bbox":[72,342,158,32]}
+{"kind":"textbox","id":"sh/hgzupsrq","slide":2,"text":"4 事件\n932 窗口","textPreview":"4 事件 | 932 窗口","textChars":11,"textLines":2,"bbox":[72,382,158,60]}
+{"kind":"shape","id":"sh/wfqdgnq5","slide":2,"bbox":[362,280,34,34]}
+{"kind":"textbox","id":"sh/vexcni9k","slide":2,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[362,280,34,34]}
+{"kind":"textbox","id":"sh/udoved8z","slide":2,"text":"评估升级","textPreview":"评估升级","textChars":4,"textLines":1,"bbox":[300,342,158,32]}
+{"kind":"textbox","id":"sh/9cfulsre","slide":2,"text":"降水 + 空间\n对象 + 事件","textPreview":"降水 + 空间 | 对象 + 事件","textChars":15,"textLines":2,"bbox":[300,382,158,60]}
+{"kind":"shape","id":"sh/8b6dcnq9","slide":2,"bbox":[590,280,34,34]}
+{"kind":"textbox","id":"sh/7axcji9o","slide":2,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[590,280,34,34]}
+{"kind":"textbox","id":"sh/m9ovad83","slide":2,"text":"损失消融","textPreview":"损失消融","textChars":4,"textLines":1,"bbox":[528,342,158,32]}
+{"kind":"textbox","id":"sh/l8fuh8ri","slide":2,"text":"MSE → Soft CSI","textPreview":"MSE → Soft CSI","textChars":14,"textLines":1,"bbox":[528,382,158,60]}
+{"kind":"shape","id":"sh/k76d83ax","slide":2,"bbox":[818,280,34,34]}
+{"kind":"textbox","id":"sh/crqdo3it","slide":2,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[818,280,34,34]}
+{"kind":"textbox","id":"sh/dsjex8ze","slide":2,"text":"基线对比","textPreview":"基线对比","textChars":4,"textLines":1,"bbox":[756,342,158,32]}
+{"kind":"textbox","id":"sh/qp8vmd0n","slide":2,"text":"SimVP / ConvLSTM","textPreview":"SimVP / ConvLSTM","textChars":16,"textLines":1,"bbox":[756,382,158,60]}
+{"kind":"shape","id":"sh/bqhcvih8","slide":2,"bbox":[1046,280,34,34]}
+{"kind":"textbox","id":"sh/onqdk3ix","slide":2,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[1046,280,34,34]}
+{"kind":"textbox","id":"sh/pozut8z2","slide":2,"text":"运动诊断","textPreview":"运动诊断","textChars":4,"textLines":1,"bbox":[984,342,158,32]}
+{"kind":"textbox","id":"sh/2l8vit0r","slide":2,"text":"方向 · 尺度\n门控","textPreview":"方向 · 尺度 | 门控","textChars":10,"textLines":2,"bbox":[984,382,158,60]}
+{"kind":"shape","id":"sh/3mhcryhc","slide":2,"bbox":[142,506,996,96]}
+{"kind":"textbox","id":"sh/8jadwny1","slide":2,"text":"核心进展","textPreview":"核心进展","textChars":4,"textLines":1,"bbox":[170,526,120,30]}
+{"kind":"textbox","id":"sh/9k3e5szm","slide":2,"text":"已定位下一阶段瓶颈：不是“有没有运动信号”，而是“何时、何处、以多大幅度移动”。","textPreview":"已定位下一阶段瓶颈：不是“有没有运动信号”，而是“何时、何处、以多大幅度移动”。","textChars":40,"textLines":1,"bbox":[304,516,790,54]}
+{"kind":"notes","id":"nt/qch77e","slide":2,"text":"[Sources]\n.research/run_log.md\n.research/project_manifest.yml"}
+{"kind":"slide","id":"sl/hk8858","slide":3,"title":"02 · 评价体系","textShapes":19}
+{"kind":"textbox","id":"sh/mt8vmtkn","slide":3,"text":"02 · 评价体系","textPreview":"02 · 评价体系","textChars":9,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/9wzuh8jy","slide":3,"text":"最低像素误差，并不等于最佳强降水预报","textPreview":"最低像素误差，并不等于最佳强降水预报","textChars":18,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/8vqdo32d","slide":3,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/z6hcbe1w","slide":3,"text":"EVALUATION","textPreview":"EVALUATION","textChars":10,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/y58vi9kb","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/lszudoj2","slide":3,"text":"统一协议","textPreview":"统一协议","textChars":4,"textLines":1,"bbox":[72,178,210,30]}
+{"kind":"shape","id":"sh/07qdkj2h","slide":3,"bbox":[72,231,8,8]}
+{"kind":"textbox","id":"sh/j21wni10","slide":3,"text":"10 帧历史输入 → 20 帧递归预测","textPreview":"10 帧历史输入 → 20 帧递归预测","textChars":19,"textLines":1,"bbox":[92,220,450,42]}
+{"kind":"shape","id":"sh/i1svudkf","slide":3,"bbox":[72,279,8,8]}
+{"kind":"textbox","id":"sh/sn6dwv69","slide":3,"text":"0–1 h / 1–2 h 分时段评估","textPreview":"0–1 h / 1–2 h 分时段评估","textChars":19,"textLines":1,"bbox":[92,268,450,42]}
+{"kind":"shape","id":"sh/dofu507u","slide":3,"bbox":[72,327,8,8]}
+{"kind":"textbox","id":"sh/ql4vuloj","slide":3,"text":"16 / 32 mm·h⁻¹ 两级强降水阈值","textPreview":"16 / 32 mm·h⁻¹ 两级强降水阈值","textChars":22,"textLines":1,"bbox":[92,316,450,42]}
+{"kind":"textbox","id":"sh/rmdc3qpo","slide":3,"text":"四层指标","textPreview":"四层指标","textChars":4,"textLines":1,"bbox":[620,178,210,30]}
+{"kind":"shape","id":"sh/4zmdsv6d","slide":3,"bbox":[620,222,500,58]}
+{"kind":"textbox","id":"sh/5kvu107y","slide":3,"text":"降水","textPreview":"降水","textChars":2,"textLines":1,"bbox":[640,231,90,38]}
+{"kind":"textbox","id":"sh/ix4bql87","slide":3,"text":"CSI · POD · FAR · Bias","textPreview":"CSI · POD · FAR · Bias","textChars":22,"textLines":1,"bbox":[744,231,350,38]}
+{"kind":"shape","id":"sh/3ydczqps","slide":3,"bbox":[620,296,500,58]}
+{"kind":"textbox","id":"sh/gvmtobq1","slide":3,"text":"空间","textPreview":"空间","textChars":2,"textLines":1,"bbox":[640,305,90,38]}
+{"kind":"textbox","id":"sh/hwvuxg7m","slide":3,"text":"FSS · 质心误差","textPreview":"FSS · 质心误差","textChars":10,"textLines":1,"bbox":[744,305,350,38]}
+{"kind":"shape","id":"sh/xsna1czq","slide":3,"bbox":[620,370,500,58]}
+{"kind":"textbox","id":"sh/wrets7i5","slide":3,"text":"对象","textPreview":"对象","textChars":2,"textLines":1,"bbox":[640,379,90,38]}
+{"kind":"textbox","id":"sh/vqlsz2hk","slide":3,"text":"IoU · 对象 POD/FAR","textPreview":"IoU · 对象 POD/FAR","textChars":16,"textLines":1,"bbox":[744,379,350,38]}
+{"kind":"shape","id":"sh/apcrqx0z","slide":3,"bbox":[620,444,500,58]}
+{"kind":"textbox","id":"sh/9o3axsze","slide":3,"text":"保持","textPreview":"保持","textChars":2,"textLines":1,"bbox":[640,453,90,38]}
+{"kind":"textbox","id":"sh/8nu9onit","slide":3,"text":"面积 · 能量 · 强度","textPreview":"面积 · 能量 · 强度","textChars":12,"textLines":1,"bbox":[744,453,350,38]}
+{"kind":"shape","id":"sh/nmlsvih8","slide":3,"bbox":[72,480,480,116]}
+{"kind":"textbox","id":"sh/mlcrmx03","slide":3,"text":"Checkpoint 选择原则","textPreview":"Checkpoint 选择原则","textChars":15,"textLines":1,"bbox":[96,500,300,27]}
+{"kind":"textbox","id":"sh/tk7a9wzi","slide":3,"text":"以强降水 CSI 为主，联合约束 FAR、Bias 与空间误差。","textPreview":"以强降水 CSI 为主，联合约束 FAR、Bias 与空间误差。","textChars":32,"textLines":1,"bbox":[96,530,410,48]}
+{"kind":"notes","id":"nt/hk8858","slide":3,"text":"[Sources]\ndocs/bth_radar_evaluation.md\n.research/history/r1_5ep_results.md"}
+{"kind":"slide","id":"sl/byxjf9","slide":4,"title":"03 · SIMVP 损失消融","textShapes":12}
+{"kind":"textbox","id":"sh/8n6loru9","slide":4,"text":"03 · SIMVP 损失消融","textPreview":"03 · SIMVP 损失消融","textChars":15,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/7mx4vmdo","slide":4,"text":"损失函数改造将强降水综合分数提升 84%","textPreview":"损失函数改造将强降水综合分数提升 84%","textChars":20,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/mlo3mhc3","slide":4,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/hszm1wvq","slide":4,"text":"LOSS ABLATION","textPreview":"LOSS ABLATION","textChars":13,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/wrqlsru5","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/up83q1cf","slide":4,"text":"主要增益来源","textPreview":"主要增益来源","textChars":6,"textLines":1,"bbox":[850,202,290,30]}
+{"kind":"shape","id":"sh/5gjm5gv2","slide":4,"bbox":[850,250,300,132]}
+{"kind":"textbox","id":"sh/4falwbuh","slide":4,"text":"+39%","textPreview":"+39%","textChars":4,"textLines":1,"bbox":[868,266,264,50]}
+{"kind":"textbox","id":"sh/i1c36psn","slide":4,"text":"强像素加权","textPreview":"强像素加权","textChars":5,"textLines":1,"bbox":[868,315,264,28]}
+{"kind":"textbox","id":"sh/j2l4zut8","slide":4,"text":"0.381 → 0.531","textPreview":"0.381 → 0.531","textChars":13,"textLines":1,"bbox":[868,344,264,23]}
+{"kind":"shape","id":"sh/k3u58zad","slide":4,"bbox":[850,404,300,132]}
+{"kind":"textbox","id":"sh/543m14by","slide":4,"text":"+15%","textPreview":"+15%","textChars":4,"textLines":1,"bbox":[868,420,264,50]}
+{"kind":"textbox","id":"sh/65cnapsj","slide":4,"text":"Soft CSI","textPreview":"Soft CSI","textChars":8,"textLines":1,"bbox":[868,469,264,28]}
+{"kind":"textbox","id":"sh/76l43ut4","slide":4,"text":"0.531 → 0.610","textPreview":"0.531 → 0.610","textChars":13,"textLines":1,"bbox":[868,498,264,23]}
+{"kind":"textbox","id":"sh/s7u5czap","slide":4,"text":"结论：采用分时段 Soft CSI 作为后续训练基线。","textPreview":"结论：采用分时段 Soft CSI 作为后续训练基线。","textChars":27,"textLines":1,"bbox":[850,566,300,48]}
+{"kind":"chart","id":"ch/n2tkbexs","slide":4,"name":"","chartType":"bar","bbox":[70,185,720,390]}
+{"kind":"notes","id":"nt/byxjf9","slide":4,"text":"[Sources]\n.research/history/r2_ablation_results.md"}
+{"kind":"slide","id":"sl/wkjvx3","slide":5,"title":"04 · SIMVP 基线","textShapes":24}
+{"kind":"textbox","id":"sh/jepcbeho","slide":5,"text":"04 · SIMVP 基线","textPreview":"04 · SIMVP 基线","textChars":13,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/4fyt4jy9","slide":5,"text":"SimVP 达到 0.714，但召回提升伴随空间虚警","textPreview":"SimVP 达到 0.714，但召回提升伴随空间虚警","textChars":26,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/5g7udozu","slide":5,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/qhgb6tgf","slide":5,"text":"SIMVP BASELINE","textPreview":"SIMVP BASELINE","textChars":14,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/ri9cfeh0","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"shape","id":"sh/sjit8jy5","slide":5,"bbox":[72,180,250,132]}
+{"kind":"textbox","id":"sh/dkruhozq","slide":5,"text":"0.714","textPreview":"0.714","textChars":5,"textLines":1,"bbox":[90,196,214,50]}
+{"kind":"textbox","id":"sh/mlwbupgv","slide":5,"text":"综合 CSI","textPreview":"综合 CSI","textChars":6,"textLines":1,"bbox":[90,245,214,28]}
+{"kind":"textbox","id":"sh/7m5s3uhg","slide":5,"text":"epoch 3 · 10 epochs","textPreview":"epoch 3 · 10 epochs","textChars":19,"textLines":1,"bbox":[90,274,214,23]}
+{"kind":"shape","id":"sh/fehsfe18","slide":5,"bbox":[342,180,250,132]}
+{"kind":"textbox","id":"sh/ed8b69k3","slide":5,"text":"+5.24%","textPreview":"+5.24%","textChars":6,"textLines":1,"bbox":[360,196,214,50]}
+{"kind":"textbox","id":"sh/1gju14je","slide":5,"text":"较 5-epoch","textPreview":"较 5-epoch","textChars":9,"textLines":1,"bbox":[360,245,214,28]}
+{"kind":"textbox","id":"sh/gfqt8j2t","slide":5,"text":"主要来自第二小时","textPreview":"主要来自第二小时","textChars":8,"textLines":1,"bbox":[360,274,214,23]}
+{"kind":"shape","id":"sh/rqhsbu1c","slide":5,"bbox":[612,180,250,132]}
+{"kind":"textbox","id":"sh/6p8b2pkr","slide":5,"text":"0.108","textPreview":"0.108","textChars":5,"textLines":1,"bbox":[630,196,214,50]}
+{"kind":"textbox","id":"sh/tszad4ji","slide":5,"text":"1–2 h CSI@16","textPreview":"1–2 h CSI@16","textChars":12,"textLines":1,"bbox":[630,245,214,28]}
+{"kind":"textbox","id":"sh/srqt4z2x","slide":5,"text":"覆盖明显恢复","textPreview":"覆盖明显恢复","textChars":6,"textLines":1,"bbox":[630,274,214,23]}
+{"kind":"shape","id":"sh/jmxs7u1g","slide":5,"bbox":[882,180,250,132]}
+{"kind":"textbox","id":"sh/ilobypkv","slide":5,"text":"0.034","textPreview":"0.034","textChars":5,"textLines":1,"bbox":[900,196,214,50]}
+{"kind":"textbox","id":"sh/mhobap4n","slide":5,"text":"1–2 h CSI@32","textPreview":"1–2 h CSI@32","textChars":12,"textLines":1,"bbox":[900,245,214,28]}
+{"kind":"textbox","id":"sh/nixcju58","slide":5,"text":"仍处于低位","textPreview":"仍处于低位","textChars":5,"textLines":1,"bbox":[900,274,214,23]}
+{"kind":"textbox","id":"sh/8j6tcfmt","slide":5,"text":"收益","textPreview":"收益","textChars":2,"textLines":1,"bbox":[72,354,150,30]}
+{"kind":"shape","id":"sh/9kfulkny","slide":5,"bbox":[72,403,8,8]}
+{"kind":"textbox","id":"sh/alobep4j","slide":5,"text":"第二小时覆盖、POD 与强度恢复","textPreview":"第二小时覆盖、POD 与强度恢复","textChars":16,"textLines":1,"bbox":[92,392,450,42]}
+{"kind":"shape","id":"sh/vmxcnu54","slide":5,"bbox":[72,453,8,8]}
+{"kind":"textbox","id":"sh/wn6dgzmp","slide":5,"text":"Intensity ratio 1–2 h 恢复至 1.019","textPreview":"Intensity ratio 1–2 h 恢复至 1.019","textChars":31,"textLines":1,"bbox":[92,442,450,42]}
+{"kind":"textbox","id":"sh/hofup4na","slide":5,"text":"代价","textPreview":"代价","textChars":2,"textLines":1,"bbox":[650,354,150,30]}
+{"kind":"shape","id":"sh/ip8vi94v","slide":5,"bbox":[650,403,8,8]}
+{"kind":"textbox","id":"sh/jqhcre5g","slide":5,"text":"第一小时 Bias@16/32：1.33 / 1.41","textPreview":"第一小时 Bias@16/32：1.33 / 1.41","textChars":27,"textLines":1,"bbox":[670,392,480,42]}
+{"kind":"shape","id":"sh/tkjeh87i","slide":5,"bbox":[650,453,8,8]}
+{"kind":"textbox","id":"sh/sjax836x","slide":5,"text":"第二小时 FAR@16/32：0.789 / 0.905","textPreview":"第二小时 FAR@16/32：0.789 / 0.905","textChars":28,"textLines":1,"bbox":[670,442,480,42]}
+{"kind":"shape","id":"sh/ri1wfypc","slide":5,"bbox":[72,530,1060,72]}
+{"kind":"textbox","id":"sh/6hsf6tor","slide":5,"text":"定位","textPreview":"定位","textChars":2,"textLines":1,"bbox":[96,549,80,30]}
+{"kind":"textbox","id":"sh/183el87e","slide":5,"text":"当前候选中召回最完整，但尚未解决长时空间重叠与虚警。","textPreview":"当前候选中召回最完整，但尚未解决长时空间重叠与虚警。","textChars":26,"textLines":1,"bbox":[180,541,900,44]}
+{"kind":"notes","id":"nt/wkjvx3","slide":5,"text":"[Sources]\n.research/history/r3_selected_epoch03_analysis.md"}
+{"kind":"slide","id":"sl/rfawi5","slide":6,"title":"05 · 循环基线","textShapes":12}
+{"kind":"textbox","id":"sh/wn29gf29","slide":6,"text":"05 · 循环基线","textPreview":"05 · 循环基线","textChars":9,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/b2t87alo","slide":6,"text":"ConvLSTM 改善局地重叠，仍未解决长时位移","textPreview":"ConvLSTM 改善局地重叠，仍未解决长时位移","textChars":24,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/a1kre5k3","slide":6,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/lsvqdk3q","slide":6,"text":"CONVLSTM","textPreview":"CONVLSTM","textChars":8,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/krm9kf25","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/yp4ri5kz","slide":6,"text":"改善","textPreview":"改善","textChars":2,"textLines":1,"bbox":[850,194,180,28]}
+{"kind":"shape","id":"sh/1wrq1g36","slide":6,"bbox":[850,243,8,8]}
+{"kind":"textbox","id":"sh/0vi98v21","slide":6,"text":"FSS 与匹配对象 IoU","textPreview":"FSS 与匹配对象 IoU","textChars":13,"textLines":1,"bbox":[870,232,310,42]}
+{"kind":"shape","id":"sh/q9k3qt43","slide":6,"bbox":[850,287,8,8]}
+{"kind":"textbox","id":"sh/rut4jylo","slide":6,"text":"第一小时强降水 CSI","textPreview":"第一小时强降水 CSI","textChars":11,"textLines":1,"bbox":[870,276,310,42]}
+{"kind":"textbox","id":"sh/sv2ls3m9","slide":6,"text":"未解决","textPreview":"未解决","textChars":3,"textLines":1,"bbox":[850,346,180,28]}
+{"kind":"shape","id":"sh/dwbmlo3u","slide":6,"bbox":[850,395,8,8]}
+{"kind":"textbox","id":"sh/exk3ut4f","slide":6,"text":"质心误差仍为 84–88 km","textPreview":"质心误差仍为 84–88 km","textChars":15,"textLines":1,"bbox":[870,384,310,42]}
+{"kind":"shape","id":"sh/fyd4nyl0","slide":6,"bbox":[850,439,8,8]}
+{"kind":"textbox","id":"sh/0zm5w32l","slide":6,"text":"第二小时 Bias@32 达 2.88","textPreview":"第二小时 Bias@32 达 2.88","textChars":19,"textLines":1,"bbox":[870,428,310,42]}
+{"kind":"shape","id":"sh/10vmp83q","slide":6,"bbox":[850,483,8,8]}
+{"kind":"textbox","id":"sh/214nydkb","slide":6,"text":"事件鲁棒性弱于 SimVP","textPreview":"事件鲁棒性弱于 SimVP","textChars":13,"textLines":1,"bbox":[870,472,310,42]}
+{"kind":"shape","id":"sh/n2d4rilw","slide":6,"bbox":[842,540,330,66]}
+{"kind":"textbox","id":"sh/j6xkfi14","slide":6,"text":"保留为运动分支骨干，不直接替代 SimVP。","textPreview":"保留为运动分支骨干，不直接替代 SimVP。","textChars":22,"textLines":1,"bbox":[864,550,286,44]}
+{"kind":"chart","id":"ch/zap4vahg","slide":6,"name":"","chartType":"bar","bbox":[60,190,720,380]}
+{"kind":"notes","id":"nt/rfawi5","slide":6,"text":"[Sources]\n.research/history/convlstm_r2d_ft_checkpoint_analysis.md"}
+{"kind":"slide","id":"sl/4363b0","slide":7,"title":"06 · R4-B 运动分支","textShapes":27}
+{"kind":"textbox","id":"sh/edc3290f","slide":7,"text":"06 · R4-B 运动分支","textPreview":"06 · R4-B 运动分支","textChars":14,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/1g3mxoj6","slide":7,"text":"显式运动改善定位，却让强降水结构快速衰减","textPreview":"显式运动改善定位，却让强降水结构快速衰减","textChars":20,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/0ful4jil","slide":7,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/ra14ru1o","slide":7,"text":"MOTION EVOLUTION","textPreview":"MOTION EVOLUTION","textChars":16,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/69s3y903","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/tc3mt4ju","slide":7,"text":"空间定位收益","textPreview":"空间定位收益","textChars":6,"textLines":1,"bbox":[72,180,280,30]}
+{"kind":"shape","id":"sh/sbul0zi9","slide":7,"bbox":[72,224,255,132]}
+{"kind":"textbox","id":"sh/b6543yh8","slide":7,"text":"68.9 km","textPreview":"68.9 km","textChars":7,"textLines":1,"bbox":[90,240,219,50]}
+{"kind":"textbox","id":"sh/a5wnat0n","slide":7,"text":"质心误差 @16","textPreview":"质心误差 @16","textChars":8,"textLines":1,"bbox":[90,289,219,28]}
+{"kind":"textbox","id":"sh/w76pon21","slide":7,"text":"较 ConvLSTM 降 10.5 km","textPreview":"较 ConvLSTM 降 10.5 km","textChars":20,"textLines":1,"bbox":[90,318,219,23]}
+{"kind":"shape","id":"sh/x8z6hsjm","slide":7,"bbox":[347,224,255,132]}
+{"kind":"textbox","id":"sh/a5o7mdkv","slide":7,"text":"56.7 km","textPreview":"56.7 km","textChars":7,"textLines":1,"bbox":[365,240,219,50]}
+{"kind":"textbox","id":"sh/v6xofi1g","slide":7,"text":"质心误差 @32","textPreview":"质心误差 @32","textChars":8,"textLines":1,"bbox":[365,289,219,28]}
+{"kind":"textbox","id":"sh/836pkn25","slide":7,"text":"较 ConvLSTM 降 31.2 km","textPreview":"较 ConvLSTM 降 31.2 km","textChars":20,"textLines":1,"bbox":[365,318,219,23]}
+{"kind":"textbox","id":"sh/94f6d8jq","slide":7,"text":"结构保持代价","textPreview":"结构保持代价","textChars":6,"textLines":1,"bbox":[678,180,280,30]}
+{"kind":"shape","id":"sh/m1onidkz","slide":7,"bbox":[678,224,220,132]}
+{"kind":"textbox","id":"sh/n2xobi1k","slide":7,"text":"19.7%","textPreview":"19.7%","textChars":5,"textLines":1,"bbox":[696,240,184,50]}
+{"kind":"textbox","id":"sh/0fm5g32t","slide":7,"text":"面积保持 @32","textPreview":"面积保持 @32","textChars":8,"textLines":1,"bbox":[696,289,184,28]}
+{"kind":"textbox","id":"sh/l0v698je","slide":7,"text":"多数强雨区消失","textPreview":"多数强雨区消失","textChars":7,"textLines":1,"bbox":[696,318,184,23]}
+{"kind":"shape","id":"sh/hknux076","slide":7,"bbox":[918,224,220,132]}
+{"kind":"textbox","id":"sh/gjed4vql","slide":7,"text":"17.5%","textPreview":"17.5%","textChars":5,"textLines":1,"bbox":[936,240,184,50]}
+{"kind":"textbox","id":"sh/filcvqp0","slide":7,"text":"能量保持 @32","textPreview":"能量保持 @32","textChars":8,"textLines":1,"bbox":[936,289,184,28]}
+{"kind":"textbox","id":"sh/uxcv258f","slide":7,"text":"强度持续衰减","textPreview":"强度持续衰减","textChars":6,"textLines":1,"bbox":[936,318,184,23]}
+{"kind":"shape","id":"sh/tw3ut07u","slide":7,"bbox":[72,410,1066,2]}
+{"kind":"textbox","id":"sh/svud0vq9","slide":7,"text":"因果链","textPreview":"因果链","textChars":3,"textLines":1,"bbox":[72,438,120,30]}
+{"kind":"shape","id":"sh/7ulcrq94","slide":7,"bbox":[198,430,202,82]}
+{"kind":"textbox","id":"sh/6tcvyl8j","slide":7,"text":"20 步递归插值","textPreview":"20 步递归插值","textChars":8,"textLines":1,"bbox":[214,446,170,48]}
+{"kind":"textbox","id":"sh/ds7e5k7e","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[402,450,38,36]}
+{"kind":"shape","id":"sh/crydwfqt","slide":7,"bbox":[443,430,202,82]}
+{"kind":"textbox","id":"sh/ax8bqhob","slide":7,"text":"强雨边缘被平滑","textPreview":"强雨边缘被平滑","textChars":7,"textLines":1,"bbox":[459,446,170,48]}
+{"kind":"textbox","id":"sh/vyhszm5w","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[647,450,38,36]}
+{"kind":"shape","id":"sh/wzqtsr61","slide":7,"bbox":[688,430,202,82]}
+{"kind":"textbox","id":"sh/x0ja1wnm","slide":7,"text":"面积与能量收缩","textPreview":"面积与能量收缩","textChars":7,"textLines":1,"bbox":[704,446,170,48]}
+{"kind":"textbox","id":"sh/mt8rmhoz","slide":7,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[892,450,38,36]}
+{"kind":"shape","id":"sh/nuhsv2pk","slide":7,"bbox":[933,430,202,82]}
+{"kind":"textbox","id":"sh/8vq9o765","slide":7,"text":"POD / CSI32 下降","textPreview":"POD / CSI32 下降","textChars":14,"textLines":1,"bbox":[949,446,170,48]}
+{"kind":"shape","id":"sh/9wzaxc7q","slide":7,"bbox":[72,552,1066,54]}
+{"kind":"textbox","id":"sh/6psby1oj","slide":7,"text":"仅靠搬运无法维持或生成强降水：后续仍需要门控与强度源汇机制。","textPreview":"仅靠搬运无法维持或生成强降水：后续仍需要门控与强度源汇机制。","textChars":30,"textLines":1,"bbox":[96,560,1018,38]}
+{"kind":"notes","id":"nt/4363b0","slide":7,"text":"[Sources]\n.research/history/r4b_motion_pre0788_5ep_analysis.md"}
+{"kind":"slide","id":"sl/aty6me","slide":8,"title":"07 · 运动可辨识性","textShapes":24}
+{"kind":"textbox","id":"sh/qxwjelsf","slide":8,"text":"07 · 运动可辨识性","textPreview":"07 · 运动可辨识性","textChars":11,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/d072pgbq","slide":8,"text":"运动方向有效，真正缺失的是“是否应该移动”","textPreview":"运动方向有效，真正缺失的是“是否应该移动”","textChars":21,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/sze1gval","slide":8,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/3u50j6to","slide":8,"text":"FLOW DIAGNOSTICS","textPreview":"FLOW DIAGNOSTICS","textChars":16,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/itwja1s3","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/5wnilgbu","slide":8,"text":"真实运动类别","textPreview":"真实运动类别","textChars":6,"textLines":1,"bbox":[78,190,310,30]}
+{"kind":"textbox","id":"sh/4ve1cba9","slide":8,"text":"最佳流尺度 α","textPreview":"最佳流尺度 α","textChars":7,"textLines":1,"bbox":[500,190,220,30]}
+{"kind":"textbox","id":"sh/v6l0f6ts","slide":8,"text":"诊断解释","textPreview":"诊断解释","textChars":4,"textLines":1,"bbox":[820,190,270,30]}
+{"kind":"shape","id":"sh/u5cj61s7","slide":8,"bbox":[72,230,1060,58]}
+{"kind":"textbox","id":"sh/kvid03ip","slide":8,"text":"近静止 <0.2 px","textPreview":"近静止 <0.2 px","textChars":11,"textLines":1,"bbox":[94,240,330,38]}
+{"kind":"textbox","id":"sh/lwrut8ja","slide":8,"text":"0","textPreview":"0","textChars":1,"textLines":1,"bbox":[518,240,180,38]}
+{"kind":"textbox","id":"sh/yt0vyt0j","slide":8,"text":"不应搬运","textPreview":"不应搬运","textChars":4,"textLines":1,"bbox":[820,240,280,38]}
+{"kind":"shape","id":"sh/zu9cry14","slide":8,"bbox":[72,306,1060,58]}
+{"kind":"textbox","id":"sh/crydwjit","slide":8,"text":"亚像素 0.2–0.5 px","textPreview":"亚像素 0.2–0.5 px","textChars":14,"textLines":1,"bbox":[94,316,330,38]}
+{"kind":"textbox","id":"sh/xs7u5oje","slide":8,"text":"0.5","textPreview":"0.5","textChars":3,"textLines":1,"bbox":[518,316,180,38]}
+{"kind":"textbox","id":"sh/a5gvut0n","slide":8,"text":"需要减弱","textPreview":"需要减弱","textChars":4,"textLines":1,"bbox":[820,316,280,38]}
+{"kind":"shape","id":"sh/b6pc3y18","slide":8,"bbox":[72,382,1060,58]}
+{"kind":"textbox","id":"sh/wn2d8nix","slide":8,"text":"明显移动 0.5–1 px","textPreview":"明显移动 0.5–1 px","textChars":13,"textLines":1,"bbox":[94,392,330,38]}
+{"kind":"textbox","id":"sh/hobe1szi","slide":8,"text":"1.0","textPreview":"1.0","textChars":3,"textLines":1,"bbox":[518,392,180,38]}
+{"kind":"textbox","id":"sh/5k7ulsrm","slide":8,"text":"保留完整流","textPreview":"保留完整流","textChars":5,"textLines":1,"bbox":[820,392,280,38]}
+{"kind":"shape","id":"sh/4jydsna1","slide":8,"bbox":[72,458,1060,58]}
+{"kind":"textbox","id":"sh/3ipcji9g","slide":8,"text":"快速 / 困难 >1 px","textPreview":"快速 / 困难 >1 px","textChars":13,"textLines":1,"bbox":[94,468,330,38]}
+{"kind":"textbox","id":"sh/ihgvqdsv","slide":8,"text":"1.25","textPreview":"1.25","textChars":4,"textLines":1,"bbox":[518,468,180,38]}
+{"kind":"textbox","id":"sh/hg7uh8rq","slide":8,"text":"可能低估幅度","textPreview":"可能低估幅度","textChars":6,"textLines":1,"bbox":[820,468,280,38]}
+{"kind":"shape","id":"sh/gfydo3a5","slide":8,"bbox":[72,560,330,132]}
+{"kind":"textbox","id":"sh/ve5cfy9k","slide":8,"text":"86%–91%","textPreview":"86%–91%","textChars":7,"textLines":1,"bbox":[90,576,294,50]}
+{"kind":"textbox","id":"sh/udwvmtsz","slide":8,"text":"移动对象方向正确率","textPreview":"移动对象方向正确率","textChars":9,"textLines":1,"bbox":[90,625,294,28]}
+{"kind":"textbox","id":"sh/tcnud8be","slide":8,"text":"正确半平面","textPreview":"正确半平面","textChars":5,"textLines":1,"bbox":[90,654,294,23]}
+{"kind":"shape","id":"sh/8redk3at","slide":8,"bbox":[426,550,706,92]}
+{"kind":"textbox","id":"sh/yxcru98r","slide":8,"text":"结论","textPreview":"结论","textChars":2,"textLines":1,"bbox":[450,578,82,28]}
+{"kind":"textbox","id":"sh/jilsnupc","slide":8,"text":"需要条件化运动置信度，\n而不是永久乘一个固定小尺度。","textPreview":"需要条件化运动置信度， | 而不是永久乘一个固定小尺度。","textChars":26,"textLines":2,"bbox":[540,562,560,64]}
+{"kind":"notes","id":"nt/aty6me","slide":8,"text":"[Sources]\n.research/history/r4b_flow_scale_persistent_object_diagnostic.md"}
+{"kind":"slide","id":"sl/1skif2","slide":9,"title":"08 · R4-B2 门控","textShapes":25}
+{"kind":"textbox","id":"sh/qdoj25gf","slide":9,"text":"08 · R4-B2 门控","textPreview":"08 · R4-B2 门控","textChars":13,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/d0f2xkz6","slide":9,"text":"门控已学到排序信号，但尚未通过递归预报检验","textPreview":"门控已学到排序信号，但尚未通过递归预报检验","textChars":21,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/sz614fyl","slide":9,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/f2xkzuhc","slide":9,"text":"MOTION GATING","textPreview":"MOTION GATING","textChars":13,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/e1oj6pgr","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"shape","id":"sh/14z21kz2","slide":9,"bbox":[72,200,248,210]}
+{"kind":"textbox","id":"sh/03618fyh","slide":9,"text":"Gate-only","textPreview":"Gate-only","textChars":9,"textLines":1,"bbox":[90,220,212,28]}
+{"kind":"textbox","id":"sh/v6d0nqhs","slide":9,"text":"≈ 0.94","textPreview":"≈ 0.94","textChars":6,"textLines":1,"bbox":[90,270,212,50]}
+{"kind":"shape","id":"sh/u54jul07","slide":9,"bbox":[90,334,58,4]}
+{"kind":"textbox","id":"sh/4vip0nqp","slide":9,"text":"塌缩到接近全流","textPreview":"塌缩到接近全流","textChars":7,"textLines":1,"bbox":[90,352,212,38]}
+{"kind":"shape","id":"sh/5wr6ts7u","slide":9,"bbox":[350,200,248,210]}
+{"kind":"textbox","id":"sh/itg7yd8j","slide":9,"text":"Oracle 预训练","textPreview":"Oracle 预训练","textChars":10,"textLines":1,"bbox":[368,220,212,28]}
+{"kind":"textbox","id":"sh/3u9orip4","slide":9,"text":"0.57 → 0.71","textPreview":"0.57 → 0.71","textChars":11,"textLines":1,"bbox":[368,270,212,50]}
+{"kind":"shape","id":"sh/szip4nql","slide":9,"bbox":[368,334,58,4]}
+{"kind":"textbox","id":"sh/dkr6xs76","slide":9,"text":"近静止与移动可分","textPreview":"近静止与移动可分","textChars":8,"textLines":1,"bbox":[368,352,212,38]}
+{"kind":"shape","id":"sh/qx072x8f","slide":9,"bbox":[628,200,248,210]}
+{"kind":"textbox","id":"sh/ry9ov2p0","slide":9,"text":"Scale 0.5","textPreview":"Scale 0.5","textChars":9,"textLines":1,"bbox":[646,220,212,28]}
+{"kind":"textbox","id":"sh/83y5s3qh","slide":9,"text":"CSI 0.641","textPreview":"CSI 0.641","textChars":9,"textLines":1,"bbox":[646,270,212,50]}
+{"kind":"shape","id":"sh/9o76l87m","slide":9,"bbox":[646,334,58,4]}
+{"kind":"textbox","id":"sh/p8fe90ve","slide":9,"text":"FAR 下降、POD 下降","textPreview":"FAR 下降、POD 下降","textChars":13,"textLines":1,"bbox":[646,352,212,38]}
+{"kind":"shape","id":"sh/o76d0vet","slide":9,"bbox":[906,200,248,210]}
+{"kind":"textbox","id":"sh/n6xw7qd8","slide":9,"text":"第二小时 @32","textPreview":"第二小时 @32","textChars":8,"textLines":1,"bbox":[924,220,212,28]}
+{"kind":"textbox","id":"sh/2lovylwn","slide":9,"text":"CSI 0.009","textPreview":"CSI 0.009","textChars":9,"textLines":1,"bbox":[924,270,212,50]}
+{"kind":"shape","id":"sh/xcfed0vq","slide":9,"bbox":[924,334,58,4]}
+{"kind":"textbox","id":"sh/cb6d4fe5","slide":9,"text":"强雨生存仍失败","textPreview":"强雨生存仍失败","textChars":7,"textLines":1,"bbox":[924,352,212,38]}
+{"kind":"textbox","id":"sh/baxwbadk","slide":9,"text":"决策门","textPreview":"决策门","textChars":3,"textLines":1,"bbox":[72,462,150,30]}
+{"kind":"shape","id":"sh/a9ov25wz","slide":9,"bbox":[76,512,28,28]}
+{"kind":"textbox","id":"sh/lgzehkvm","slide":9,"text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[76,509,28,32]}
+{"kind":"textbox","id":"sh/kfqd8fe1","slide":9,"text":"移动对象优于零流","textPreview":"移动对象优于零流","textChars":8,"textLines":1,"bbox":[120,508,410,34]}
+{"kind":"shape","id":"sh/il0b2hcj","slide":9,"bbox":[76,560,28,28]}
+{"kind":"textbox","id":"sh/3mtsbmt4","slide":9,"text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[76,557,28,32]}
+{"kind":"textbox","id":"sh/4n2t4rup","slide":9,"text":"近静止对象不过移","textPreview":"近静止对象不过移","textChars":8,"textLines":1,"bbox":[120,556,410,34]}
+{"kind":"shape","id":"sh/5obadwba","slide":9,"bbox":[76,608,28,28]}
+{"kind":"textbox","id":"sh/qpkb6hcf","slide":9,"text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[76,605,28,32]}
+{"kind":"textbox","id":"sh/rqtsfmt0","slide":9,"text":"第二小时 CSI32 不下降","textPreview":"第二小时 CSI32 不下降","textChars":14,"textLines":1,"bbox":[120,604,410,34]}
+{"kind":"shape","id":"sh/sr2t8rul","slide":9,"bbox":[630,484,502,126]}
+{"kind":"textbox","id":"sh/dcbahwb6","slide":9,"text":"R4-c 暂不进入","textPreview":"R4-c 暂不进入","textChars":9,"textLines":1,"bbox":[656,502,450,32]}
+{"kind":"textbox","id":"sh/ed4ba1cr","slide":9,"text":"先让门控在递归预测中同时保护定位与强雨生存，再加入 source / sink。","textPreview":"先让门控在递归预测中同时保护定位与强雨生存，再加入 source / sink。","textChars":40,"textLines":1,"bbox":[656,542,440,52]}
+{"kind":"notes","id":"nt/1skif2","slide":9,"text":"[Sources]\n.research/history/r4a_r4b2_motion_gate_analysis.md\n.research/history/r4b_motion_rainrate_scale05_5ep_analysis.md"}
+{"kind":"slide","id":"sl/3by0qz","slide":10,"title":"09 · 下一步","textShapes":18}
+{"kind":"textbox","id":"sh/ryxk3qx0","slide":10,"text":"09 · 下一步","textPreview":"09 · 下一步","textChars":8,"textLines":1,"bbox":[72,34,300,28]}
+{"kind":"textbox","id":"sh/cz61cbel","slide":10,"text":"下周先解决运动置信度，再引入强度源汇机制","textPreview":"下周先解决运动置信度，再引入强度源汇机制","textChars":20,"textLines":1,"bbox":[72,66,1120,62]}
+{"kind":"shape","id":"sh/d0f25gf6","slide":10,"bbox":[72,136,66,5]}
+{"kind":"textbox","id":"sh/2t4j61wj","slide":10,"text":"NEXT STEPS","textPreview":"NEXT STEPS","textChars":10,"textLines":1,"bbox":[72,680,480,20]}
+{"kind":"textbox","id":"sh/3udkz6x4","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1160,680,48,20]}
+{"kind":"textbox","id":"sh/4v618bep","slide":10,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,184,54,54]}
+{"kind":"shape","id":"sh/pwf21gfu","slide":10,"bbox":[142,210,52,3]}
+{"kind":"textbox","id":"sh/u54j21w7","slide":10,"text":"增强门控输入","textPreview":"增强门控输入","textChars":6,"textLines":1,"bbox":[218,184,300,30]}
+{"kind":"textbox","id":"sh/f6dkv6xs","slide":10,"text":"加入历史差分与固定光流线索","textPreview":"加入历史差分与固定光流线索","textChars":13,"textLines":1,"bbox":[530,184,600,34]}
+{"kind":"textbox","id":"sh/3ehob6tk","slide":10,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[72,270,54,54]}
+{"kind":"shape","id":"sh/it8nilsz","slide":10,"bbox":[142,296,52,3]}
+{"kind":"textbox","id":"sh/5gj6dgba","slide":10,"text":"条件化运动幅度","textPreview":"条件化运动幅度","textChars":7,"textLines":1,"bbox":[218,270,300,30]}
+{"kind":"textbox","id":"sh/4fq5kba5","slide":10,"text":"分样本、分时效或空间化置信度","textPreview":"分样本、分时效或空间化置信度","textChars":14,"textLines":1,"bbox":[530,270,600,34]}
+{"kind":"textbox","id":"sh/ri1ofqtg","slide":10,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,356,54,54]}
+{"kind":"shape","id":"sh/qhsnmlsv","slide":10,"bbox":[142,382,52,3]}
+{"kind":"textbox","id":"sh/dkj6h0bm","slide":10,"text":"统一两类检验","textPreview":"统一两类检验","textChars":6,"textLines":1,"bbox":[218,356,300,30]}
+{"kind":"textbox","id":"sh/sjapova1","slide":10,"text":"Teacher-forced 与 20 步递归同步评估","textPreview":"Teacher-forced 与 20 步递归同步评估","textChars":27,"textLines":1,"bbox":[530,356,600,34]}
+{"kind":"textbox","id":"sh/7mxo3mtc","slide":10,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[72,442,54,54]}
+{"kind":"shape","id":"sh/6lona1sr","slide":10,"bbox":[142,468,52,3]}
+{"kind":"textbox","id":"sh/atgzytgb","slide":10,"text":"通过后进入 R4-c","textPreview":"通过后进入 R4-c","textChars":10,"textLines":1,"bbox":[218,442,300,30]}
+{"kind":"textbox","id":"sh/bup07yhw","slide":10,"text":"加入 source / sink 或强度修正分支","textPreview":"加入 source / sink 或强度修正分支","textChars":24,"textLines":1,"bbox":[530,442,600,34]}
+{"kind":"shape","id":"sh/wfyh03yh","slide":10,"bbox":[72,540,1060,90]}
+{"kind":"textbox","id":"sh/xg7i98z2","slide":10,"text":"本周结论","textPreview":"本周结论","textChars":4,"textLines":1,"bbox":[96,570,130,30]}
+{"kind":"textbox","id":"sh/mpwzutgf","slide":10,"text":"显式运动能够改善定位；下一步成败取决于门控能否同时保护\n近静止对象与长时强降水。","textPreview":"显式运动能够改善定位；下一步成败取决于门控能否同时保护 | 近静止对象与长时强降水。","textChars":40,"textLines":2,"bbox":[238,550,860,68]}
+{"kind":"notes","id":"nt/3by0qz","slide":10,"text":"[Sources]\n.research/run_log.md\n.research/open_questions.md"}

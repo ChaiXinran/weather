@@ -1,5 +1,42 @@
 # Research workspace run log
 
+## 2026-08-01 - R4-a and R4-b2 spatial motion gate
+
+- R4-a history-only Farneback median3 improved CSI16 from zero-flow .62011 to
+  .66446 but did not improve CSI32 (.54408 vs .55187). Persistent moving
+  objects improve while near-static objects are over-moved, establishing
+  partial six-minute motion identifiability and the need for spatial gating.
+- Added an optional spatial per-lead flow gate and compatible loading of the
+  0.660787 encoder/raw-motion checkpoint.
+- Gate-only training under the existing objective collapsed toward full flow
+  (gate about .94), confirming the need for direct motion-necessity supervision.
+- Added strong-rain oracle-scale gate targets using teacher-forced candidate
+  scales. Oracle-only gate pretraining learned an ordered gate (.57 near-static
+  vs .71 moving at 16 mm/h), recovered teacher-forced CSI16 to .65881 at its
+  deployed scale, and reduced the CSI32 deficit to .00303, but still over-moves
+  near-static objects.
+- R4-b2 is promising but R4-c remains gated. Next change: explicit historical
+  difference/fixed-flow cue into the confidence gate.
+- Report: `.research/history/r4a_r4b2_motion_gate_analysis.md`.
+
+## 2026-08-01 - R4-b D1/D2 no-training flow audit
+
+- Audited the 0.660787 checkpoint with rain-rate teacher-forced flow scales
+  `[-1, 0, .25, .5, .75, 1, 1.25]` on all 932 validation windows.
+- Positive scaled flow beats zero flow: alpha .5 gives CSI16 .65879 and alpha
+  .25 gives CSI32 .57066, versus zero-flow .62011/.55187. Negative flow is
+  dramatically worse, excluding a global sign/convention error.
+- Across four events, CSI16 always selects alpha .5; CSI32 selects .25 in three
+  events and .5 in one.
+- 115,707 persistent object-window observations show conditional calibration:
+  near-static objects prefer zero, subpixel objects prefer .5, clearly moving
+  objects prefer 1, and fast/difficult matches prefer 1.25. Moving-object flow
+  points into the correct half-plane for roughly 86--91% of observations.
+- Revised interpretation: flow contains real directional signal but lacks a
+  motion-necessity/confidence gate. Proceed to R4-a and R4-b2 gating, not R4-c.
+- Report: `.research/history/r4b_flow_scale_persistent_object_diagnostic.md`.
+- Artifacts: `work_dirs/bth_r4b_ft_ep0_flow_scale_diag/`.
+
 ## 2026-08-01 - R4-b five-epoch continuation from C
 
 - Initialized the full rain-rate/no-stop C model from its 0.642496 checkpoint
@@ -74,3 +111,53 @@
 - Created a machine-readable project manifest, data dictionary, experiment matrix, frozen-decision log, open-question list, and the human-readable context index.
 - Historical metrics are labeled by protocol; incomplete R1 results are explicitly separated from completed formal results.
 - No training was launched and no model/configuration code was changed during this context-compression run.
+## 2026-08-01 - R4-a/R4-b2 detailed time-and-rain-rate metrics
+
+- Recomputed the frozen 932-window teacher-forced motion diagnostics with
+  CSI, POD, FAR, and Bias split into 0--1 h versus 1--2 h and 16 versus
+  32 mm/h thresholds.
+- Added the matching recursive 20-step validation breakdown for the ungated
+  0.660787 checkpoint and oracle-supervised gate epoch 2.
+- Teacher-forced gated/reduced flow improves motion alignment, but the deployed
+  gate loses second-hour CSI32 and the oracle gate worsens recursive survival;
+  R4-c therefore remains a no-go.
+- Report: `.research/history/r4a_r4b2_motion_gate_analysis.md`.
+- Detailed artifacts:
+  `work_dirs/bth_r4a_fixed_flow_detailed/saved/fixed_flow_diagnostics/` and
+  `work_dirs/bth_r4b2_oracle_gate_ep2_detailed/saved/flow_scale_diagnostics/`.
+## 2026-08-01 - Formal simplified R4-b configuration
+
+- Added `configs/bth_radar/ConvLSTM_evolution_motion_rainrate_scale05.py` as
+  the canonical motion-only R4-b configuration.
+- The configuration fixes the `rain_rate` motion-only path, disables the
+  optional learned gate and oracle supervision, and limits displacement to
+  1 pixel per 6-minute step. Relative to the original 2-pixel bound, this is
+  exactly the selected global 0.5 flow calibration for an existing checkpoint.
+- Stop-gradient/no-stop-gradient is not promoted as part of this inference
+  configuration; the explicit override was removed.
+- No source/sink or intensity-generation head is present.
+## 2026-08-01 - R4-b rain-rate scale-0.5 five-epoch run
+
+- Completed five epochs in the WSL OpenSTL environment from the ConvLSTM
+  0.788316 history encoder using the formal rain-rate motion-only configuration.
+- Validation CSI score progressed .529999, .529821, .589512, .598675, and
+  .633323; epoch 4 is CSI-best, while epoch 3 is val-loss-best (.009423).
+- Against ConvLSTM 0.788316, epoch 4 lowers FAR in every 16/32-mm/h time block
+  but loses POD and Bias severely, especially CSI32 in hour two (.00878 versus
+  .05439). It is a conservative motion ablation, not a baseline replacement.
+- Report: `.research/history/r4b_motion_rainrate_scale05_5ep_analysis.md`.
+- Artifacts: `work_dirs/bth_r4b_motion_rainrate_scale05_5ep_seed0/` and
+  `lightning_logs/version_40/metrics.csv`.
+## 2026-08-02 - R4-b scale-0.5 low-LR five-epoch continuation
+
+- Continued the `.633323` checkpoint for five epochs with motion-head LR
+  `1e-4` and encoder LR `2e-5`.
+- Actual configured encoder freeze remained two epochs; the best score was
+  `.640662` at continuation epoch 1 while only the motion path was updating.
+- Scores then fell to `.619840/.617094` after encoder unfreezing and recovered
+  only to `.628359`, showing that further backbone adaptation is harmful here.
+- The selected continuation checkpoint slightly exceeds ConvLSTM 0.788 at
+  second-hour CSI16 (.11230 vs .10982), but second-hour CSI32 remains only
+  .00923 vs .05439. Stop identical continuation and retain it as the best clean
+  motion-only scale-0.5 checkpoint.
+- Report: `.research/history/r4b_motion_rainrate_scale05_5ep_analysis.md`.
