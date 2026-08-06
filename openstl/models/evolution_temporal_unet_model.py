@@ -142,15 +142,7 @@ class EvolutionTemporalUNet_Model(nn.Module):
             self.configs, 'evolution_source_active_threshold', 0.1))
         for step in range(flow.shape[1]):
             if teacher_forcing is not None and step > 0:
-                if teacher_forcing_ratio >= 1.0:
-                    current = teacher_forcing[:, step - 1]
-                elif teacher_forcing_ratio > 0.0:
-                    use_truth = (torch.rand(
-                        current.shape[0], device=current.device) <
-                        teacher_forcing_ratio)
-                    current = torch.where(
-                        use_truth[:, None, None, None],
-                        teacher_forcing[:, step - 1], current)
+                current = teacher_forcing[:, step - 1]
             transport_input = (
                 current.detach() if self.operator.stop_gradient else current)
             advected = self.operator.warp(transport_input, flow[:, step])
@@ -163,14 +155,9 @@ class EvolutionTemporalUNet_Model(nn.Module):
                 self.operator.max_rain, self.max_displacement)
             capacity = self._factorized_capacity(advected_rain)
             source_mask = None
-            if teacher_forcing is not None and teacher_forcing_ratio >= 1.0:
-                target_rain = normalized_dbz_to_rain(
-                    teacher_forcing[:, step],
-                    value_scale=self.operator.value_scale,
-                    zr_a=self.operator.zr_a, zr_b=self.operator.zr_b)
+            if teacher_forcing is not None:
                 source_mask = self._erode_mask(
-                    (advected_rain >= active_threshold)
-                    & (target_rain >= active_threshold), radius=1)
+                    advected_rain >= active_threshold, radius=1)
             elif bool(getattr(
                     self.configs,
                     'evolution_factorized_mask_advected_inference', True)):

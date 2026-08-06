@@ -87,11 +87,15 @@ class EvolutionConvLSTM_Model(nn.Module):
                 nn.init.zeros_(self.regime_head.weight)
                 nn.init.zeros_(self.growth_head.weight)
                 nn.init.zeros_(self.decay_head.weight)
+                regime_prior = torch.tensor([0.01, 0.98, 0.01])
                 with torch.no_grad():
-                    self.regime_head.bias.copy_(
-                        torch.tensor([0.0, 20.0, 0.0]))
-                nn.init.constant_(self.growth_head.bias, -20.0)
-                nn.init.constant_(self.decay_head.bias, -20.0)
+                    self.regime_head.bias.copy_(regime_prior.log())
+                nn.init.constant_(
+                    self.growth_head.bias,
+                    torch.logit(torch.tensor(0.001)).item())
+                nn.init.constant_(
+                    self.decay_head.bias,
+                    torch.logit(torch.tensor(0.001)).item())
             elif self.source_parameterization == 'bounded_state':
                 self.source_lead_dim = int(getattr(
                     configs, 'evolution_source_lead_dim', 8))
@@ -333,12 +337,8 @@ class EvolutionConvLSTM_Model(nn.Module):
             capacity = self._factorized_capacity(advected_rain)
             source_mask = None
             if teacher_forcing is not None:
-                target_rain = normalized_dbz_to_rain(
-                    teacher_forcing[:, step], value_scale=self.operator.value_scale,
-                    zr_a=self.operator.zr_a, zr_b=self.operator.zr_b)
                 source_mask = self._erode_mask(
-                    (advected_rain >= active_threshold)
-                    & (target_rain >= active_threshold), radius=1)
+                    advected_rain >= active_threshold, radius=1)
             elif bool(getattr(
                     self.configs,
                     'evolution_factorized_mask_advected_inference', True)):

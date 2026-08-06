@@ -43,6 +43,15 @@ class EvolutionPhysicsBase(Base_method):
         # batch_y is deliberately ignored: the physical predictor only sees history.
         return self.model(batch_x)
 
+    def _run_model(self, batch_x, return_aux=False, teacher_forcing=None,
+                   teacher_forcing_ratio=None):
+        kwargs = {'return_aux': return_aux, 'teacher_forcing': teacher_forcing}
+        if (teacher_forcing_ratio is not None
+                and 'teacher_forcing_ratio'
+                in self.model.forward.__code__.co_varnames):
+            kwargs['teacher_forcing_ratio'] = teacher_forcing_ratio
+        return self.model(batch_x, **kwargs)
+
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
         source_only = bool(self.hparams.get('evolution_source_only', False))
@@ -171,18 +180,21 @@ class EvolutionPhysicsBase(Base_method):
             'evolution_source_active_threshold', 0.1))
         advected_active = advected_rain >= threshold
         target_active = target_rain >= threshold
-        interior = self._erode_mask(advected_active & target_active, radius=1)
+        action = self._erode_mask(advected_active, radius=1)
+        interior = action & target_active
         birth = (~advected_active) & target_active
-        death = advected_active & (~target_active)
+        death = action & (~target_active)
         dilated_union = self._dilate_mask(advected_active | target_active, radius=1)
-        edge = dilated_union & ~(interior | birth | death)
+        edge = dilated_union & ~(action | birth)
         clear = ~(interior | edge | birth | death)
         return {
+            'action': action,
             'interior': interior,
             'edge': edge,
             'birth': birth,
             'death': death,
             'clear': clear,
+            'train': interior | death,
         }
 
     def _build_regime_labels(self, oracle_source, interior):
@@ -210,7 +222,8 @@ class EvolutionPhysicsBase(Base_method):
             return logits.sum() * 0.0
         valid_labels = flat_labels[valid]
         counts = torch.bincount(valid_labels, minlength=3).to(logits.dtype)
-        weights = counts.sum() / (3.0 * counts.clamp_min(1.0))
+        weights = torch.sqrt(counts.sum() / counts.clamp_min(1.0))
+        weights = weights.clamp_max(2.0)
         weights = torch.where(counts > 0, weights, torch.zeros_like(weights))
         return torch.nn.functional.cross_entropy(
             logits[valid], valid_labels, weight=weights)
@@ -226,7 +239,83 @@ class EvolutionPhysicsBase(Base_method):
         loss = (error * weights).sum() / weights.sum().clamp_min(1.0)
         return loss, weights
 
-    def _factorized_source_terms(self, result, batch_y):
+    def _rain_state_error(self, pred_rain, target_rain):
+        rain_scale = float(self.model.operator.max_rain)
+        log_scale = torch.log1p(pred_rain.new_tensor(rain_scale))
+        beta = float(self.hparams.get(
+            'evolution_state_normalized_huber_beta', 0.02))
+        linear_error = torch.nn.functional.smooth_l1_loss(
+            pred_rain / max(rain_scale, 1e-6),
+            target_rain / max(rain_scale, 1e-6),
+            reduction='none', beta=beta)
+        log_error = torch.nn.functional.smooth_l1_loss(
+            torch.log1p(pred_rain.clamp_min(0.0)) / log_scale,
+            torch.log1p(target_rain.clamp_min(0.0)) / log_scale,
+            reduction='none', beta=beta)
+        return 0.5 * linear_error + 0.5 * log_error
+
+    def _weighted_rain_state_loss(self, pred_rain, target_rain, active):
+        error = self._rain_state_error(pred_rain, target_rain)
+        event_rain = torch.maximum(pred_rain.detach(), target_rain)
+        return self._pixel_weighted_state_loss(
+            error, active, active & (event_rain >= 16.0),
+            active & (event_rain >= 32.0),
+            increment16=self.hparams.get('evolution_pixel_16_increment', 1.0),
+            increment32=self.hparams.get('evolution_pixel_32_increment', 1.0),
+            max_weight=self.hparams.get('evolution_pixel_max_weight', 3.0))
+
+    def _soft_csi_loss(self, pred_rain, target_rain, threshold):
+        threshold = float(threshold)
+        temperature = float(self.hparams.get(
+            'evolution_soft_csi_temperature', max(1.0, 0.125 * threshold)))
+        pred = torch.sigmoid((pred_rain - threshold) / temperature)
+        target = (target_rain >= threshold).to(pred.dtype)
+        eps = pred.new_tensor(1e-6)
+        intersection = (pred * target).sum()
+        union = pred.sum() + target.sum() - intersection
+        return 1.0 - (intersection + eps) / (union + eps)
+
+    def _area_bias_loss(self, pred_rain, target_rain, thresholds=(16.0, 32.0)):
+        losses = []
+        eps = pred_rain.new_tensor(1e-6)
+        for threshold in thresholds:
+            threshold = float(threshold)
+            temperature = float(self.hparams.get(
+                'evolution_soft_csi_temperature',
+                max(1.0, 0.125 * threshold)))
+            pred_area = torch.sigmoid(
+                (pred_rain - threshold) / temperature).sum()
+            target_area = (target_rain >= threshold).to(pred_rain.dtype).sum()
+            losses.append(torch.abs(torch.log((pred_area + eps)
+                                              / (target_area + eps))))
+        return torch.stack(losses).mean()
+
+    def _source_guard_loss(self, evolved_rain, advected_rain, target_rain,
+                           mask):
+        motion_error = (advected_rain.detach() - target_rain).abs()
+        source_error = (evolved_rain - target_rain).abs()
+        return self._masked_mean(
+            torch.relu(source_error - motion_error), mask)
+
+    def _source_budget_loss(self, result, target_rain, mechanism_result=None):
+        pred_mass = result['net_source'].sum(dim=(2, 3, 4)).cumsum(dim=1)
+        if mechanism_result is None:
+            oracle_source = target_rain - result['advected_rain'].detach()
+            masks = self._build_physical_region_masks(
+                result['advected_rain'].detach(), target_rain)
+        else:
+            oracle_source = (
+                target_rain - mechanism_result['advected_rain'].detach())
+            masks = self._build_physical_region_masks(
+                mechanism_result['advected_rain'].detach(), target_rain)
+        train_mask = masks['train'].to(oracle_source.dtype)
+        target_mass = (oracle_source * train_mask).sum(
+            dim=(2, 3, 4)).cumsum(dim=1)
+        rain_mass = target_rain.sum(dim=(2, 3, 4)).cumsum(dim=1)
+        return ((pred_mass - target_mass).abs()
+                / rain_mass.clamp_min(1.0)).mean()
+
+    def _teacher_forced_effective_source_terms(self, result, batch_y):
         batch_y = batch_y[:, :result['prediction'].shape[1]]
         operator = self.model.operator
         target_rain = normalized_dbz_to_rain(
@@ -235,49 +324,67 @@ class EvolutionPhysicsBase(Base_method):
         advected_rain = result['advected_rain'].detach()
         oracle_source = target_rain - advected_rain
         masks = self._build_physical_region_masks(advected_rain, target_rain)
-        interior = masks['interior']
-        labels = self._build_regime_labels(oracle_source, interior)
+        train_mask = masks['train']
+        labels = self._build_regime_labels(oracle_source, train_mask)
 
         regime_loss = self._balanced_regime_loss(result['regime_logits'], labels)
         growth_mask = labels == 0
         steady_mask = labels == 1
         decay_mask = labels == 2
-        growth_target = (
-            oracle_source / result['positive_capacity'].detach().clamp_min(1e-6)
-        ).clamp(0.0, 1.0)
-        decay_target = (
-            -oracle_source / advected_rain.clamp_min(1e-6)
-        ).clamp(0.0, 1.0)
-        growth_error = torch.nn.functional.smooth_l1_loss(
-            result['growth_fraction'], growth_target, reduction='none',
-            beta=float(self.hparams.get('evolution_magnitude_huber_beta', 0.05)))
-        decay_error = torch.nn.functional.smooth_l1_loss(
-            result['decay_fraction'], decay_target, reduction='none',
-            beta=float(self.hparams.get('evolution_magnitude_huber_beta', 0.05)))
-        magnitude_loss = (
-            self._masked_mean(growth_error, growth_mask)
-            + self._masked_mean(decay_error, decay_mask))
 
-        masked_source = result['net_source'] * interior.to(result['net_source'].dtype)
-        masked_evolved_rain = (result['advected_rain'] + masked_source).clamp_min(0.0)
-        state_error = torch.nn.functional.smooth_l1_loss(
-            masked_evolved_rain, target_rain, reduction='none',
-            beta=float(self.hparams.get('evolution_state_huber_beta', 1.0)))
-        event_rain = torch.maximum(advected_rain, target_rain)
-        state_active = interior & (event_rain >= float(self.hparams.get(
-            'evolution_source_active_threshold', 0.1)))
+        pred_growth = (
+            result['regime_probability'][:, :, 0:1]
+            * result['growth_fraction']
+            * result['positive_capacity'])
+        pred_decay = (
+            result['regime_probability'][:, :, 2:3]
+            * result['decay_fraction']
+            * advected_rain)
+        target_growth = torch.minimum(
+            oracle_source.clamp_min(0.0),
+            result['positive_capacity'].detach())
+        target_decay = torch.minimum(
+            (-oracle_source).clamp_min(0.0), advected_rain)
+
+        capacity_denom = result['positive_capacity'].detach().clamp_min(1e-6)
+        advected_denom = advected_rain.clamp_min(1e-6)
+        beta = float(self.hparams.get(
+            'evolution_effective_source_huber_beta', 0.05))
+        growth_error = torch.nn.functional.smooth_l1_loss(
+            pred_growth / capacity_denom, target_growth / capacity_denom,
+            reduction='none', beta=beta)
+        decay_error = torch.nn.functional.smooth_l1_loss(
+            pred_decay / advected_denom, target_decay / advected_denom,
+            reduction='none', beta=beta)
+        effective_growth_loss = self._masked_mean(growth_error, train_mask)
+        effective_decay_loss = self._masked_mean(decay_error, train_mask)
+        effective_loss = effective_growth_loss + effective_decay_loss
+
         state_loss, pixel_weights = self._pixel_weighted_state_loss(
-            state_error, state_active, state_active & (event_rain >= 16.0),
-            state_active & (event_rain >= 32.0),
+            self._rain_state_error(result['evolved_rain'], target_rain),
+            train_mask, train_mask & (torch.maximum(
+                advected_rain, target_rain) >= 16.0),
+            train_mask & (torch.maximum(advected_rain, target_rain) >= 32.0),
             increment16=self.hparams.get('evolution_pixel_16_increment', 1.0),
             increment32=self.hparams.get('evolution_pixel_32_increment', 1.0),
             max_weight=self.hparams.get('evolution_pixel_max_weight', 3.0))
+        steady_budget = (pred_growth + pred_decay) / (
+            advected_rain + result['positive_capacity'].detach()
+        ).clamp_min(1e-6)
+        steady_loss = self._masked_mean(steady_budget, steady_mask)
+        guard_loss = self._source_guard_loss(
+            result['evolved_rain'], advected_rain, target_rain, train_mask)
+
         loss = (float(self.hparams.get('evolution_regime_loss_weight', 1.0))
                 * regime_loss
-                + float(self.hparams.get('evolution_magnitude_loss_weight', 1.0))
-                * magnitude_loss
-                + float(self.hparams.get('evolution_state_loss_weight', 0.2))
-                * state_loss)
+                + float(self.hparams.get('evolution_effective_loss_weight', 1.0))
+                * effective_loss
+                + float(self.hparams.get('evolution_state_loss_weight', 1.0))
+                * state_loss
+                + float(self.hparams.get('evolution_steady_loss_weight', 0.25))
+                * steady_loss
+                + float(self.hparams.get('evolution_guard_loss_weight', 0.5))
+                * guard_loss)
         if 'edge_flow' in result:
             edge_error = torch.nn.functional.smooth_l1_loss(
                 result['advected_rain'], target_rain, reduction='none',
@@ -313,29 +420,38 @@ class EvolutionPhysicsBase(Base_method):
                 recall_values.append(recall)
                 f1_values.append(2.0 * precision * recall / (
                     precision + recall + eps))
-            predicted_growth = masked_source.clamp_min(0.0)
-            predicted_decay = (-masked_source).clamp_min(0.0)
             oracle_growth = oracle_source.clamp_min(0.0)
             oracle_decay = (-oracle_source).clamp_min(0.0)
             values = {
                 'loss': loss,
+                'effective_loss': effective_loss,
+                'effective_growth_loss': effective_growth_loss,
+                'effective_decay_loss': effective_decay_loss,
                 'regime_loss': regime_loss,
-                'magnitude_loss': magnitude_loss,
+                'magnitude_loss': effective_loss,
                 'state_loss': state_loss,
+                'steady_loss': steady_loss,
+                'guard_loss': guard_loss,
                 'interior_state_mae': self._masked_mean(
-                    (masked_evolved_rain - target_rain).abs(), interior),
+                    (result['evolved_rain'] - target_rain).abs(),
+                    masks['interior']),
+                'train_state_mae': self._masked_mean(
+                    (result['evolved_rain'] - target_rain).abs(),
+                    train_mask),
                 'regime_macro_f1': torch.stack(f1_values).mean(),
                 'growth_precision': precision_values[0],
                 'growth_recall': recall_values[0],
                 'decay_precision': precision_values[2],
                 'decay_recall': recall_values[2],
                 'growth_source_scale_ratio': (
-                    self._masked_mean(predicted_growth, growth_mask)
+                    self._masked_mean(pred_growth, growth_mask)
                     / (self._masked_mean(oracle_growth, growth_mask) + eps)),
                 'decay_source_scale_ratio': (
-                    self._masked_mean(predicted_decay, decay_mask)
+                    self._masked_mean(pred_decay, decay_mask)
                     / (self._masked_mean(oracle_decay, decay_mask) + eps)),
-                'interior_fraction': interior.float().mean(),
+                'action_fraction': masks['action'].float().mean(),
+                'interior_fraction': masks['interior'].float().mean(),
+                'death_fraction': masks['death'].float().mean(),
                 'growth_fraction': growth_mask.float().mean(),
                 'steady_fraction': steady_mask.float().mean(),
                 'decay_fraction': decay_mask.float().mean(),
@@ -345,20 +461,82 @@ class EvolutionPhysicsBase(Base_method):
                     result['net_source'].abs(), masks['birth']),
                 'clear_source_abs': self._masked_mean(
                     result['net_source'].abs(), masks['clear']),
-                'pixel_weight_mean': self._masked_mean(pixel_weights, state_active),
+                'pixel_weight_mean': self._masked_mean(pixel_weights, train_mask),
                 'edge_transport_loss': edge_loss,
                 'edge_flow_abs': (result['edge_flow'].abs().mean()
                                   if 'edge_flow' in result else edge_loss),
             }
         values.update({
             'loss': loss,
+            'effective_loss': effective_loss,
+            'effective_growth_loss': effective_growth_loss,
+            'effective_decay_loss': effective_decay_loss,
             'regime_loss': regime_loss,
-            'magnitude_loss': magnitude_loss,
+            'magnitude_loss': effective_loss,
             'state_loss': state_loss,
+            'steady_loss': steady_loss,
+            'guard_loss': guard_loss,
             'edge_transport_loss': edge_loss,
             'edge_smooth_loss': edge_smooth,
         })
         return values
+
+    def _free_rollout_source_terms(self, result, batch_y,
+                                   mechanism_result=None):
+        horizon = int(self.hparams.get(
+            'evolution_rollout_horizon') or result['prediction'].shape[1])
+        horizon = max(1, min(horizon, result['prediction'].shape[1]))
+        target = batch_y[:, :horizon]
+        pred_rain = result['evolved_rain'][:, :horizon]
+        target_rain = normalized_dbz_to_rain(
+            target, value_scale=self.model.operator.value_scale,
+            zr_a=self.model.operator.zr_a, zr_b=self.model.operator.zr_b)
+        active = torch.maximum(pred_rain.detach(), target_rain) >= float(
+            self.hparams.get('evolution_source_active_threshold', 0.1))
+        state_error = self._rain_state_error(pred_rain, target_rain)
+        step_weights = torch.linspace(
+            1.0, float(self.hparams.get(
+                'evolution_rollout_last_step_weight', 1.5)),
+            steps=horizon, device=pred_rain.device,
+            dtype=pred_rain.dtype).view(1, horizon, 1, 1, 1)
+        state_loss = self._masked_mean(state_error * step_weights, active)
+        soft_csi_16 = self._soft_csi_loss(pred_rain, target_rain, 16.0)
+        soft_csi_32 = self._soft_csi_loss(pred_rain, target_rain, 32.0)
+        area_loss = self._area_bias_loss(pred_rain, target_rain)
+        budget_mechanism = None
+        if mechanism_result is not None:
+            budget_mechanism = {
+                key: value[:, :horizon]
+                for key, value in mechanism_result.items()
+                if torch.is_tensor(value) and value.ndim >= 2
+            }
+        budget_loss = self._source_budget_loss(
+            {key: (value[:, :horizon] if torch.is_tensor(value)
+                   and value.ndim >= 2 else value)
+             for key, value in result.items()},
+            target_rain, mechanism_result=budget_mechanism)
+        source_abs = result['net_source'][:, :horizon].abs().mean()
+        with torch.no_grad():
+            eps = pred_rain.new_tensor(1e-6)
+            target_mass = target_rain.sum().clamp_min(eps)
+            intensity_ratio = pred_rain.sum() / target_mass
+            harm_fraction = (
+                (pred_rain - target_rain).abs()
+                > (result['advected_rain'][:, :horizon].detach()
+                   - target_rain).abs()).float().mean()
+        return {
+            'state_loss': state_loss,
+            'soft_csi_16': soft_csi_16,
+            'soft_csi_32': soft_csi_32,
+            'area_loss': area_loss,
+            'budget_loss': budget_loss,
+            'source_abs_mean_mm_h': source_abs,
+            'source_harm_fraction': harm_fraction,
+            'intensity_ratio': intensity_ratio,
+        }
+
+    def _factorized_source_terms(self, result, batch_y):
+        return self._teacher_forced_effective_source_terms(result, batch_y)
 
     def _bounded_state_terms(self, result, batch_y):
         batch_y = batch_y[:, :result['prediction'].shape[1]]
@@ -448,32 +626,41 @@ class EvolutionPhysicsBase(Base_method):
         return values['loss']
 
     def _factorized_source_training_step(self, batch_x, batch_y):
-        warmup_epochs = int(self.hparams.get(
-            'evolution_source_teacher_forcing_epochs', 0) or 0)
-        schedule_epochs = int(self.hparams.get(
-            'evolution_source_schedule_epochs', 4) or 4)
-        if self.current_epoch < warmup_epochs:
-            teacher_forcing_ratio = 1.0
-        else:
-            progress = self.current_epoch - warmup_epochs
-            teacher_forcing_ratio = max(
-                0.0, 1.0 - progress / max(schedule_epochs, 1))
-        use_teacher_forcing = teacher_forcing_ratio > 0.0
+        mechanism_result = self._run_model(
+            batch_x, return_aux=True,
+            teacher_forcing=batch_y, teacher_forcing_ratio=1.0)
+        values = self._teacher_forced_effective_source_terms(
+            mechanism_result, batch_y)
+
         free_rollout = bool(self.hparams.get(
             'evolution_free_rollout_training', False))
-        result = self.model(
-            batch_x, return_aux=True,
-            teacher_forcing=batch_y if use_teacher_forcing else None,
-            teacher_forcing_ratio=teacher_forcing_ratio)
-        values = self._factorized_source_terms(result, batch_y)
-        if free_rollout:
-            target = batch_y[:, :result['prediction'].shape[1]]
-            rollout_loss = self.validation_criterion(
-                result['prediction'], target)
-            values['loss'] = (values['loss'] + float(self.hparams.get(
-                'evolution_rollout_loss_weight', 1.0)) * rollout_loss)
+        if free_rollout and self.model.forecast_steps > 1:
+            free_result = self._run_model(
+                batch_x, return_aux=True,
+                teacher_forcing=None, teacher_forcing_ratio=0.0)
+            rollout_terms = self._free_rollout_source_terms(
+                free_result, batch_y, mechanism_result=mechanism_result)
+            rollout_loss = (
+                float(self.hparams.get(
+                    'evolution_rollout_state_loss_weight', 0.5))
+                * rollout_terms['state_loss']
+                + float(self.hparams.get(
+                    'evolution_soft_csi_16_loss_weight', 0.05))
+                * rollout_terms['soft_csi_16']
+                + float(self.hparams.get(
+                    'evolution_soft_csi_32_loss_weight', 0.10))
+                * rollout_terms['soft_csi_32']
+                + float(self.hparams.get(
+                    'evolution_area_loss_weight', 0.02))
+                * rollout_terms['area_loss']
+                + float(self.hparams.get(
+                    'evolution_budget_loss_weight', 0.05))
+                * rollout_terms['budget_loss'])
+            values['loss'] = values['loss'] + rollout_loss
             values['rollout_loss'] = rollout_loss
-        self.log('train_teacher_forcing_ratio', teacher_forcing_ratio,
+            for name, value in rollout_terms.items():
+                values[f'rollout_{name}'] = value
+        self.log('train_teacher_forcing_ratio', 1.0,
                  on_step=False, on_epoch=True)
         for name, value in values.items():
             self.log(f'train_{name}', value, on_step=name == 'loss',
@@ -608,18 +795,43 @@ class EvolutionPhysicsBase(Base_method):
             target = batch_y[:, :steps]
             free_rollout = bool(self.hparams.get(
                 'evolution_validation_free_rollout', True))
-            result = self.model(
+            result = self._run_model(
                 batch_x, return_aux=True,
-                teacher_forcing=None if free_rollout else batch_y)
+                teacher_forcing=None if free_rollout else batch_y,
+                teacher_forcing_ratio=0.0 if free_rollout else 1.0)
             loss = self.validation_criterion(result['prediction'], target)
             self.log('val_loss', loss, on_step=True, on_epoch=True,
                      prog_bar=False)
             if self.hparams.dataname == 'bth_radar':
                 self._update_val_precipitation(result['prediction'], target)
-            values = self._factorized_source_terms(result, target)
-            for name, value in values.items():
-                self.log(f'val_tf_{name}', value, on_step=False,
+            mechanism_result = self._run_model(
+                batch_x, return_aux=True, teacher_forcing=batch_y,
+                teacher_forcing_ratio=1.0)
+            mechanism_values = self._teacher_forced_effective_source_terms(
+                mechanism_result, target)
+            for name, value in mechanism_values.items():
+                self.log(f'val_mechanism_{name}', value, on_step=False,
                          on_epoch=True, prog_bar=False)
+            free_values = self._free_rollout_source_terms(
+                result, target, mechanism_result=mechanism_result)
+            for name, value in free_values.items():
+                self.log(f'val_free_{name}', value, on_step=False,
+                         on_epoch=True, prog_bar=False)
+            target_rain = normalized_dbz_to_rain(
+                target, value_scale=self.model.operator.value_scale,
+                zr_a=self.model.operator.zr_a, zr_b=self.model.operator.zr_b)
+            local_motion_loss = self._rain_state_error(
+                result['advected_rain'].detach(), target_rain).mean()
+            local_source_loss = self._rain_state_error(
+                result['evolved_rain'], target_rain).mean()
+            self.log(
+                'val_source_gain_vs_zero',
+                local_motion_loss - local_source_loss,
+                on_step=False, on_epoch=True, prog_bar=False)
+            self.log(
+                'val_cumulative_source_mass',
+                result['net_source'].sum(dim=(2, 3, 4)).cumsum(dim=1)[:, -1].mean(),
+                on_step=False, on_epoch=True, prog_bar=False)
             return loss
         if (getattr(self.model, 'use_source', False)
                 and self.model.source_parameterization == 'bounded_state'):

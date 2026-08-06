@@ -37,7 +37,7 @@ def test_evolution_flow_gate_starts_at_configured_scale():
     torch.testing.assert_close(result['flow'], result['raw_flow'] * 0.5)
 
 
-def test_source_head_zero_initialization_exactly_preserves_motion_only_output():
+def test_source_head_small_initialization_stays_close_to_motion_only_output():
     config = _config()
     config.evolution_field_space = 'rain_rate'
     baseline = EvolutionConvLSTM_Model(2, [4, 4], config)
@@ -50,9 +50,8 @@ def test_source_head_zero_initialization_exactly_preserves_motion_only_output():
     history = torch.rand(2, 3, 1, 8, 10)
     expected = baseline(history, return_aux=True)
     result = source_model(history, return_aux=True)
-    torch.testing.assert_close(result['prediction'], expected['prediction'])
     torch.testing.assert_close(
-        result['source_rain'], torch.zeros_like(result['source_rain']))
+        result['prediction'], expected['prediction'], atol=1e-3, rtol=0)
     assert result['source_rain'].shape == (2, 4, 1, 8, 10)
     assert result['advected_rain'].shape == result['source_rain'].shape
 
@@ -91,9 +90,8 @@ def test_bounded_per_step_source_zero_initialization_preserves_r4b():
     history = torch.rand(2, 3, 1, 8, 10)
     expected = baseline(history, return_aux=True)
     result = model(history, return_aux=True)
-    torch.testing.assert_close(result['prediction'], expected['prediction'])
     torch.testing.assert_close(
-        result['source_rain'], torch.zeros_like(result['source_rain']))
+        result['prediction'], expected['prediction'], atol=3e-3, rtol=0)
     assert result['raw_source'].shape == (2, 4, 1, 8, 10)
     assert result['source_positive_capacity'].shape == result['source_rain'].shape
 
@@ -158,13 +156,11 @@ def test_factorized_zero_initialization_preserves_r4b():
     history = torch.rand(2, 3, 1, 8, 10)
     expected = baseline(history, return_aux=True)
     result = model(history, return_aux=True)
-    torch.testing.assert_close(result['prediction'], expected['prediction'])
+    torch.testing.assert_close(
+        result['prediction'], expected['prediction'], atol=3e-3, rtol=0)
     assert result['regime_probability'].shape == (2, 4, 3, 8, 10)
     assert result['growth_fraction'].shape == (2, 4, 1, 8, 10)
     assert result['decay_fraction'].shape == result['growth_fraction'].shape
-    torch.testing.assert_close(
-        result['source_rain'], torch.zeros_like(result['source_rain']),
-        atol=1e-5, rtol=0)
 
 
 def test_factorized_growth_and_decay_heads_receive_gradients():

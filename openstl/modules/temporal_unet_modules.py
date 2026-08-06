@@ -184,10 +184,15 @@ class UNetFactorizedSourceHead(nn.Module):
         nn.init.zeros_(self.regime_head.weight)
         nn.init.zeros_(self.growth_head.weight)
         nn.init.zeros_(self.decay_head.weight)
+        regime_prior = torch.tensor([0.01, 0.98, 0.01])
         with torch.no_grad():
-            self.regime_head.bias.copy_(torch.tensor([0.0, 20.0, 0.0]))
-        nn.init.constant_(self.growth_head.bias, -20.0)
-        nn.init.constant_(self.decay_head.bias, -20.0)
+            self.regime_head.bias.copy_(regime_prior.log())
+        nn.init.constant_(
+            self.growth_head.bias,
+            torch.logit(torch.tensor(0.001)).item())
+        nn.init.constant_(
+            self.decay_head.bias,
+            torch.logit(torch.tensor(0.001)).item())
 
     def encode(self, fine_feature):
         return self.source_projection(fine_feature)
