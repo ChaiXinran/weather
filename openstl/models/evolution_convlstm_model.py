@@ -172,6 +172,12 @@ class EvolutionConvLSTM_Model(nn.Module):
                 self.source_lead_embedding.parameters())
         return list(self.source_head.parameters())
 
+    def backbone_parameters(self):
+        return list(self.cell_list.parameters())
+
+    def motion_parameters(self):
+        return list(self.motion_head.parameters())
+
     @staticmethod
     def _gradient_magnitude(field):
         dx = torch.zeros_like(field)

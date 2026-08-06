@@ -2,6 +2,7 @@
 
 from .convlstm import ConvLSTM
 from .evolution_convlstm import EvolutionConvLSTM
+from .evolution_temporal_unet import EvolutionTemporalUNet
 from .e3dlstm import E3DLSTM
 from .mau import MAU
 from .mim import MIM
@@ -19,6 +20,8 @@ method_maps = {
     'convlstm': ConvLSTM,
     'evolutionconvlstm': EvolutionConvLSTM,
     'evolution_convlstm': EvolutionConvLSTM,
+    'evolutiontemporalunet': EvolutionTemporalUNet,
+    'evolution_temporal_unet': EvolutionTemporalUNet,
     'e3dlstm': E3DLSTM,
     'mau': MAU,
     'mim': MIM,
@@ -36,7 +39,8 @@ method_maps = {
 }
 
 __all__ = [
-    'method_maps', 'ConvLSTM', 'EvolutionConvLSTM', 'E3DLSTM', 'MAU', 'MIM',
+    'method_maps', 'ConvLSTM', 'EvolutionConvLSTM', 'EvolutionTemporalUNet',
+    'E3DLSTM', 'MAU', 'MIM',
     'PredRNN', 'PredRNNpp', 'PredRNNv2', 'PhyDNet', 'SimVP', 'TAU',
     "MMVP", 'SwinLSTM_D', 'SwinLSTM_B', 'WaST'
 ]

@@ -56,7 +56,9 @@ def create_parser():
                                 'PhyDNet', 'phydnet', 'PredRNN', 'predrnn', 'PredRNNpp',  'predrnnpp', 
                                 'PredRNNv2', 'predrnnv2', 'SimVP', 'simvp', 'TAU', 'tau', 'MMVP', 'mmvp', 
                                 'SwinLSTM', 'swinlstm', 'swinlstm_d', 'swinlstm_b',
-                                'EvolutionConvLSTM', 'evolution_convlstm'],
+                                'EvolutionConvLSTM', 'evolution_convlstm',
+                                'EvolutionTemporalUNet', 'evolutiontemporalunet',
+                                'evolution_temporal_unet'],
                         help='Name of video prediction method to train (default: "SimVP")')
     parser.add_argument('--config_file', '-c', default=None, type=str,
                         help='Path to the default config file')
@@ -156,6 +158,9 @@ def create_parser():
     parser.add_argument('--metric_for_bestckpt', default='val_loss', type=str)
     parser.add_argument('--ckpt_path', default=None, type=str)
     parser.add_argument(
+        '--motion_eval_only', action='store_true', default=False,
+        help='Validate a motion checkpoint with a zero-initialized source head.')
+    parser.add_argument(
         '--init_from_ckpt', default=None, type=str,
         help='Initialize model weights from a checkpoint without restoring '
              'optimizer, scheduler, epoch, or global step')
@@ -236,6 +241,7 @@ def default_parser():
         'gpus': [0],
         'metric_for_bestckpt': 'val_loss',
         'ckpt_path': None,
+        'motion_eval_only': False,
         'init_from_ckpt': None,
     }
     return default_values

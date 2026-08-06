@@ -38,13 +38,15 @@ def main():
     parser.add_argument('--data-root', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--batch-size', type=int, default=8)
+    parser.add_argument('--allow-source', action='store_true',
+                        help='evaluate a source-enabled evolution checkpoint')
     args = parser.parse_args()
 
     values = dict(load_config(args.config))
     values.update(in_shape=[10, 1, 66, 70], pre_seq_length=10,
                   aft_seq_length=20, total_length=30)
     config = SimpleNamespace(**values)
-    if getattr(config, 'evolution_use_source', False):
+    if getattr(config, 'evolution_use_source', False) and not args.allow_source:
         raise ValueError('baseline evaluation requires source to be disabled')
 
     dataset = BTHRadarDataset(
@@ -92,7 +94,7 @@ def main():
         'sample_count': len(dataset),
         'config': args.config,
         'checkpoint': args.checkpoint,
-        'source_enabled': False,
+        'source_enabled': bool(getattr(config, 'evolution_use_source', False)),
         'forecast_steps': 20,
         'lead_minutes': config.lead_minutes,
         'thresholds_mm_h': config.precip_thresholds,

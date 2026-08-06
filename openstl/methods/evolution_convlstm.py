@@ -6,8 +6,8 @@ from openstl.utils import print_log
 from .base_method import Base_method
 
 
-class EvolutionConvLSTM(Base_method):
-    """R4 motion-only ConvLSTM with an explicit differentiable transport step."""
+class EvolutionPhysicsBase(Base_method):
+    """Shared training and diagnostics for explicit physical evolution."""
 
     def __init__(self, **args):
         super().__init__(**args)
@@ -16,15 +16,15 @@ class EvolutionConvLSTM(Base_method):
             checkpoint = None
         if checkpoint:
             count = self.model.load_pretrained_encoder(checkpoint)
-            print_log(f'Loaded {count} ConvLSTM encoder tensors from {checkpoint}; '
-                      'the direct image head and optimizer state were not loaded.')
+            print_log(f'Loaded {count} evolution encoder tensors from '
+                      f'{checkpoint}; optimizer state was not loaded.')
         motion_checkpoint = self.hparams.get('evolution_motion_checkpoint', None)
         if isinstance(motion_checkpoint, str) and motion_checkpoint.lower() in ('none', 'null'):
             motion_checkpoint = None
         if motion_checkpoint:
             count = self.model.load_pretrained_motion(motion_checkpoint)
-            print_log(f'Loaded {count} encoder/motion tensors from {motion_checkpoint}; '
-                      'the flow gate and optimizer state start fresh.')
+            print_log(f'Loaded {count} encoder/motion tensors from '
+                      f'{motion_checkpoint}; optimizer state starts fresh.')
         source_checkpoint = self.hparams.get(
             'evolution_source_checkpoint', None)
         if isinstance(source_checkpoint, str) and source_checkpoint.lower() in (
@@ -37,8 +37,7 @@ class EvolutionConvLSTM(Base_method):
                 f'{source_checkpoint}; newly added mechanism heads start fresh.')
 
     def _build_model(self, **args):
-        num_hidden = [int(value) for value in self.hparams.num_hidden.split(',')]
-        return EvolutionConvLSTM_Model(len(num_hidden), num_hidden, self.hparams)
+        raise NotImplementedError
 
     def forward(self, batch_x, batch_y=None, **kwargs):
         # batch_y is deliberately ignored: the physical predictor only sees history.
@@ -49,11 +48,11 @@ class EvolutionConvLSTM(Base_method):
         source_only = bool(self.hparams.get('evolution_source_only', False))
         frozen = self.current_epoch < int(self.hparams.get(
             'evolution_freeze_encoder_epochs', 0))
-        for parameter in self.model.cell_list.parameters():
+        for parameter in self.model.backbone_parameters():
             parameter.requires_grad_(not (source_only or frozen))
         motion_frozen = self.current_epoch < int(self.hparams.get(
             'evolution_freeze_motion_epochs', 0) or 0)
-        for parameter in self.model.motion_head.parameters():
+        for parameter in self.model.motion_parameters():
             parameter.requires_grad_(not (source_only or motion_frozen))
 
     def configure_optimizers(self):
@@ -72,14 +71,15 @@ class EvolutionConvLSTM(Base_method):
             head_lr = float(
                 self.hparams.get('evolution_head_lr') or self.hparams.lr)
             parameter_groups = [
-                {'params': self.model.cell_list.parameters(), 'lr': encoder_lr},
-                {'params': self.model.motion_head.parameters(), 'lr': head_lr},
+                {'params': self.model.backbone_parameters(), 'lr': encoder_lr},
+                {'params': self.model.motion_parameters(), 'lr': head_lr},
             ]
             max_lrs = [encoder_lr, head_lr]
         if getattr(self.model, 'use_flow_gate', False) and not source_only:
             gate_lr = float(self.hparams.get('evolution_gate_lr') or head_lr)
             parameter_groups.append({
-                'params': self.model.flow_gate_head.parameters(), 'lr': gate_lr})
+                'params': self.model.flow_gate_head.parameters(),
+                'lr': gate_lr})
             max_lrs.append(gate_lr)
         if getattr(self.model, 'use_source', False) and not source_only:
             source_lr = float(self.hparams.get('evolution_source_lr') or head_lr)
@@ -448,11 +448,23 @@ class EvolutionConvLSTM(Base_method):
         return values['loss']
 
     def _factorized_source_training_step(self, batch_x, batch_y):
+        warmup_epochs = int(self.hparams.get(
+            'evolution_source_teacher_forcing_epochs', 0) or 0)
+        schedule_epochs = int(self.hparams.get(
+            'evolution_source_schedule_epochs', 4) or 4)
+        if self.current_epoch < warmup_epochs:
+            teacher_forcing_ratio = 1.0
+        else:
+            progress = self.current_epoch - warmup_epochs
+            teacher_forcing_ratio = max(
+                0.0, 1.0 - progress / max(schedule_epochs, 1))
+        use_teacher_forcing = teacher_forcing_ratio > 0.0
         free_rollout = bool(self.hparams.get(
             'evolution_free_rollout_training', False))
         result = self.model(
             batch_x, return_aux=True,
-            teacher_forcing=None if free_rollout else batch_y)
+            teacher_forcing=batch_y if use_teacher_forcing else None,
+            teacher_forcing_ratio=teacher_forcing_ratio)
         values = self._factorized_source_terms(result, batch_y)
         if free_rollout:
             target = batch_y[:, :result['prediction'].shape[1]]
@@ -461,6 +473,8 @@ class EvolutionConvLSTM(Base_method):
             values['loss'] = (values['loss'] + float(self.hparams.get(
                 'evolution_rollout_loss_weight', 1.0)) * rollout_loss)
             values['rollout_loss'] = rollout_loss
+        self.log('train_teacher_forcing_ratio', teacher_forcing_ratio,
+                 on_step=False, on_epoch=True)
         for name, value in values.items():
             self.log(f'train_{name}', value, on_step=name == 'loss',
                      on_epoch=True, prog_bar=name == 'loss')
@@ -593,7 +607,7 @@ class EvolutionConvLSTM(Base_method):
             steps = self.model.forecast_steps
             target = batch_y[:, :steps]
             free_rollout = bool(self.hparams.get(
-                'evolution_free_rollout_training', False))
+                'evolution_validation_free_rollout', True))
             result = self.model(
                 batch_x, return_aux=True,
                 teacher_forcing=None if free_rollout else batch_y)
@@ -633,3 +647,13 @@ class EvolutionConvLSTM(Base_method):
                          on_epoch=True, prog_bar=False)
             return loss
         return super().validation_step(batch, batch_idx)
+
+
+class EvolutionConvLSTM(EvolutionPhysicsBase):
+    """ConvLSTM history encoder with explicit differentiable evolution."""
+
+    def _build_model(self, **args):
+        num_hidden = [
+            int(value) for value in self.hparams.num_hidden.split(',')]
+        return EvolutionConvLSTM_Model(
+            len(num_hidden), num_hidden, self.hparams)
