@@ -66,7 +66,33 @@ class EvolutionConvLSTM_Model(nn.Module):
                 getattr(configs, 'evolution_source_max_rain', 35.0))
             if self.source_max_rain <= 0:
                 raise ValueError('evolution_source_max_rain must be positive')
-            if self.source_parameterization == 'bounded_state':
+            if self.source_parameterization == 'factorized_regime':
+                input_channels = num_hidden[-1] + channels + 2 + channels
+                self.factorized_trunk = nn.Sequential(
+                    nn.Conv2d(input_channels, head_channels, 3, padding=1),
+                    nn.GroupNorm(groups, head_channels), nn.SiLU(),
+                    nn.Conv2d(head_channels, head_channels, 3, padding=1),
+                    nn.SiLU())
+                self.regime_head = nn.Conv2d(head_channels, 3, 1)
+                self.growth_head = nn.Conv2d(head_channels, channels, 1)
+                self.decay_head = nn.Conv2d(head_channels, channels, 1)
+                self.use_edge_residual_flow = bool(getattr(
+                    configs, 'evolution_use_edge_residual_flow', False))
+                if self.use_edge_residual_flow:
+                    self.edge_flow_head = nn.Conv2d(head_channels, 2, 1)
+                    nn.init.zeros_(self.edge_flow_head.weight)
+                    nn.init.zeros_(self.edge_flow_head.bias)
+                    self.edge_flow_max_displacement = float(getattr(
+                        configs, 'evolution_edge_flow_max_displacement', 0.25))
+                nn.init.zeros_(self.regime_head.weight)
+                nn.init.zeros_(self.growth_head.weight)
+                nn.init.zeros_(self.decay_head.weight)
+                with torch.no_grad():
+                    self.regime_head.bias.copy_(
+                        torch.tensor([0.0, 20.0, 0.0]))
+                nn.init.constant_(self.growth_head.bias, -20.0)
+                nn.init.constant_(self.decay_head.bias, -20.0)
+            elif self.source_parameterization == 'bounded_state':
                 self.source_lead_dim = int(getattr(
                     configs, 'evolution_source_lead_dim', 8))
                 if self.source_lead_dim <= 0:
@@ -94,7 +120,7 @@ class EvolutionConvLSTM_Model(nn.Module):
             else:
                 raise ValueError(
                     'evolution_source_parameterization must be '
-                    'legacy_signed or bounded_state')
+                    'legacy_signed, bounded_state, or factorized_regime')
         self.max_displacement = float(getattr(configs, 'evolution_max_displacement', 2.0))
         self.forecast_steps = int(getattr(
             configs, 'evolution_forecast_steps', configs.aft_seq_length))
@@ -133,10 +159,63 @@ class EvolutionConvLSTM_Model(nn.Module):
     def source_parameters(self):
         if not self.use_source:
             return []
+        if self.source_parameterization == 'factorized_regime':
+            parameters = (list(self.factorized_trunk.parameters())
+                    + list(self.regime_head.parameters())
+                    + list(self.growth_head.parameters())
+                    + list(self.decay_head.parameters()))
+            if getattr(self, 'use_edge_residual_flow', False):
+                parameters += list(self.edge_flow_head.parameters())
+            return parameters
         if self.source_parameterization == 'bounded_state':
             return list(self.source_decoder.parameters()) + list(
                 self.source_lead_embedding.parameters())
         return list(self.source_head.parameters())
+
+    @staticmethod
+    def _gradient_magnitude(field):
+        dx = torch.zeros_like(field)
+        dy = torch.zeros_like(field)
+        dx[..., :, 1:] = field[..., :, 1:] - field[..., :, :-1]
+        dy[..., 1:, :] = field[..., 1:, :] - field[..., :-1, :]
+        return torch.sqrt(dx.square() + dy.square() + 1e-12)
+
+    @staticmethod
+    def _erode_mask(mask, radius=1):
+        flat = mask.reshape(-1, 1, *mask.shape[-2:]).float()
+        eroded = -F.max_pool2d(
+            -flat, kernel_size=2 * radius + 1, stride=1, padding=radius)
+        return (eroded > 0.5).reshape(mask.shape)
+
+    @staticmethod
+    def _edge_mask(mask, radius=1):
+        flat = mask.reshape(-1, 1, *mask.shape[-2:]).float()
+        dilated = F.max_pool2d(
+            flat, kernel_size=2 * radius + 1, stride=1, padding=radius)
+        eroded = -F.max_pool2d(
+            -flat, kernel_size=2 * radius + 1, stride=1, padding=radius)
+        return ((dilated > 0.5) & (eroded <= 0.5)).reshape(mask.shape)
+
+    def _factorized_capacity(self, advected_rain):
+        values = getattr(self.configs, 'evolution_source_capacity_values', None)
+        edges = getattr(self.configs, 'evolution_source_capacity_edges', None)
+        if values is None:
+            return torch.full_like(advected_rain, self.source_max_rain)
+        values = [float(value) for value in values]
+        if edges is None:
+            edges = [8.0, 16.0, 32.0]
+        edges = [float(value) for value in edges]
+        if len(values) != len(edges) + 1:
+            raise ValueError(
+                'evolution_source_capacity_values must have one more value '
+                'than evolution_source_capacity_edges')
+        capacity = torch.full_like(advected_rain, values[-1])
+        previous = 0.1
+        for edge, value in zip(edges, values):
+            mask = (advected_rain >= previous) & (advected_rain < edge)
+            capacity = torch.where(mask, torch.full_like(capacity, value), capacity)
+            previous = edge
+        return capacity
 
     def _bounded_source_forward(self, history, feature, flow,
                                 teacher_forcing=None):
@@ -183,6 +262,104 @@ class EvolutionConvLSTM_Model(nn.Module):
         result['source'] = result['source_rain']
         return result
 
+    def _factorized_source_forward(self, history, feature, flow,
+                                   teacher_forcing=None):
+        batch, _, channels, full_height, full_width = history.shape
+        patch_size = feature.shape[-2:]
+        current = history[:, -1]
+        collected = {
+            key: [] for key in (
+                'prediction', 'advected', 'advected_rain',
+                'regime_probability', 'growth_fraction', 'decay_fraction',
+                'growth_state', 'steady_state', 'decay_state',
+                'growth_source', 'sink', 'net_source', 'source_rain',
+                'positive_capacity', 'evolved_rain', 'regime_logits',
+                'growth_logit', 'decay_logit')}
+        if getattr(self, 'use_edge_residual_flow', False):
+            for key in ('base_flow', 'edge_flow', 'edge_mask'):
+                collected[key] = []
+        flow = flow[:, :self.forecast_steps]
+        active_threshold = float(getattr(
+            self.configs, 'evolution_source_active_threshold', 0.1))
+        for step in range(flow.shape[1]):
+            if teacher_forcing is not None and step > 0:
+                current = teacher_forcing[:, step - 1]
+            transport_input = current.detach() if self.operator.stop_gradient else current
+            advected = self.operator.warp(transport_input, flow[:, step])
+            advected_rain = normalized_dbz_to_rain(
+                advected, value_scale=self.operator.value_scale,
+                zr_a=self.operator.zr_a, zr_b=self.operator.zr_b)
+            rain_feature = F.interpolate(
+                advected_rain, size=patch_size, mode='area') / self.operator.max_rain
+            gradient_feature = F.interpolate(
+                self._gradient_magnitude(advected_rain), size=patch_size,
+                mode='area') / self.operator.max_rain
+            patch_flow = F.interpolate(
+                flow[:, step], size=patch_size, mode='bilinear',
+                align_corners=False) / max(self.max_displacement, 1e-6)
+            decoder_input = torch.cat(
+                [feature, rain_feature, patch_flow, gradient_feature], dim=1)
+            hidden = self.factorized_trunk(decoder_input)
+            step_flow = flow[:, step]
+            if getattr(self, 'use_edge_residual_flow', False):
+                edge_flow = F.interpolate(
+                    self.edge_flow_head(hidden),
+                    size=(full_height, full_width), mode='bilinear',
+                    align_corners=False)
+                edge_flow = self.edge_flow_max_displacement * torch.tanh(edge_flow)
+                edge_mask = self._edge_mask(
+                    advected_rain >= active_threshold, radius=1)
+                edge_flow = edge_flow * edge_mask.to(edge_flow.dtype)
+                step_flow = step_flow + edge_flow
+                advected = self.operator.warp(transport_input, step_flow)
+                advected_rain = normalized_dbz_to_rain(
+                    advected, value_scale=self.operator.value_scale,
+                    zr_a=self.operator.zr_a, zr_b=self.operator.zr_b)
+            regime_logits = F.interpolate(
+                self.regime_head(hidden), size=(full_height, full_width),
+                mode='bilinear', align_corners=False)
+            growth_logit = F.interpolate(
+                self.growth_head(hidden), size=(full_height, full_width),
+                mode='bilinear', align_corners=False)
+            decay_logit = F.interpolate(
+                self.decay_head(hidden), size=(full_height, full_width),
+                mode='bilinear', align_corners=False)
+            capacity = self._factorized_capacity(advected_rain)
+            source_mask = None
+            if teacher_forcing is not None:
+                target_rain = normalized_dbz_to_rain(
+                    teacher_forcing[:, step], value_scale=self.operator.value_scale,
+                    zr_a=self.operator.zr_a, zr_b=self.operator.zr_b)
+                source_mask = self._erode_mask(
+                    (advected_rain >= active_threshold)
+                    & (target_rain >= active_threshold), radius=1)
+            elif bool(getattr(
+                    self.configs,
+                    'evolution_factorized_mask_advected_inference', True)):
+                source_mask = self._erode_mask(
+                    advected_rain >= active_threshold, radius=1)
+            step_result = self.operator.evolve_factorized_step(
+                current, step_flow, regime_logits, growth_logit,
+                decay_logit, capacity, source_mask=source_mask)
+            current = step_result['prediction']
+            step_result['regime_logits'] = regime_logits
+            step_result['growth_logit'] = growth_logit
+            step_result['decay_logit'] = decay_logit
+            step_result['positive_capacity'] = step_result['positive_capacity']
+            if getattr(self, 'use_edge_residual_flow', False):
+                step_result['base_flow'] = flow[:, step]
+                step_result['edge_flow'] = edge_flow
+                step_result['edge_mask'] = edge_mask
+            for key in collected:
+                collected[key].append(step_result[key])
+        result = {key: torch.stack(value, dim=1)
+                  for key, value in collected.items()}
+        result['flow'] = (result['base_flow'] + result['edge_flow']
+                          if getattr(self, 'use_edge_residual_flow', False)
+                          else flow)
+        result['source'] = result['source_rain']
+        return result
+
     def forward(self, history, return_aux=False, teacher_forcing=None):
         if history.ndim != 5:
             raise ValueError('history must be [B,T,C,H,W]')
@@ -223,12 +400,16 @@ class EvolutionConvLSTM_Model(nn.Module):
         if self.use_source and self.source_parameterization == 'bounded_state':
             result = self._bounded_source_forward(
                 history, feature, flow, teacher_forcing=teacher_forcing)
+        elif self.use_source and self.source_parameterization == 'factorized_regime':
+            result = self._factorized_source_forward(
+                history, feature, flow, teacher_forcing=teacher_forcing)
         else:
             result = self.operator(history[:, -1], flow, source=source_rain)
         result['raw_flow'] = raw_flow
         result['flow_gate'] = flow_gate
         if not (self.use_source
-                and self.source_parameterization == 'bounded_state'):
+                and self.source_parameterization in (
+                    'bounded_state', 'factorized_regime')):
             result['raw_source'] = raw_source
         return result if return_aux else result['prediction']
 
@@ -247,6 +428,23 @@ class EvolutionConvLSTM_Model(nn.Module):
             raise ValueError(
                 f'Incompatible motion checkpoint: missing={sorted(target-set(extracted))}, '
                 f'unexpected={sorted(set(extracted)-target)}')
+        self.load_state_dict(extracted, strict=False)
+        return len(extracted)
+
+    def load_pretrained_source(self, checkpoint_path):
+        """Load compatible source tensors while leaving newly added heads fresh."""
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        state = checkpoint.get('state_dict', checkpoint)
+        prefixes = ('factorized_trunk.', 'regime_head.', 'growth_head.',
+                    'decay_head.')
+        own_state = self.state_dict()
+        extracted = {}
+        for key, value in state.items():
+            local_key = key[len('model.'):] if key.startswith('model.') else key
+            if (local_key.startswith(prefixes)
+                    and local_key in own_state
+                    and own_state[local_key].shape == value.shape):
+                extracted[local_key] = value
         self.load_state_dict(extracted, strict=False)
         return len(extracted)
 

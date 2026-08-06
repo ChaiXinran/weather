@@ -25,6 +25,16 @@ class EvolutionConvLSTM(Base_method):
             count = self.model.load_pretrained_motion(motion_checkpoint)
             print_log(f'Loaded {count} encoder/motion tensors from {motion_checkpoint}; '
                       'the flow gate and optimizer state start fresh.')
+        source_checkpoint = self.hparams.get(
+            'evolution_source_checkpoint', None)
+        if isinstance(source_checkpoint, str) and source_checkpoint.lower() in (
+                'none', 'null'):
+            source_checkpoint = None
+        if source_checkpoint:
+            count = self.model.load_pretrained_source(source_checkpoint)
+            print_log(
+                f'Loaded {count} compatible source tensors from '
+                f'{source_checkpoint}; newly added mechanism heads start fresh.')
 
     def _build_model(self, **args):
         num_hidden = [int(value) for value in self.hparams.num_hidden.split(',')]
@@ -135,6 +145,77 @@ class EvolutionConvLSTM(Base_method):
         return (values * weights).sum() / weights.sum().clamp_min(1.0)
 
     @staticmethod
+    def _erode_mask(mask, radius=1):
+        if radius <= 0:
+            return mask
+        original_shape = mask.shape
+        flat = mask.reshape(-1, 1, *mask.shape[-2:]).float()
+        kernel = 2 * int(radius) + 1
+        eroded = -torch.nn.functional.max_pool2d(
+            -flat, kernel_size=kernel, stride=1, padding=radius)
+        return (eroded > 0.5).reshape(original_shape)
+
+    @staticmethod
+    def _dilate_mask(mask, radius=1):
+        if radius <= 0:
+            return mask
+        original_shape = mask.shape
+        flat = mask.reshape(-1, 1, *mask.shape[-2:]).float()
+        kernel = 2 * int(radius) + 1
+        dilated = torch.nn.functional.max_pool2d(
+            flat, kernel_size=kernel, stride=1, padding=radius)
+        return (dilated > 0.5).reshape(original_shape)
+
+    def _build_physical_region_masks(self, advected_rain, target_rain):
+        threshold = float(self.hparams.get(
+            'evolution_source_active_threshold', 0.1))
+        advected_active = advected_rain >= threshold
+        target_active = target_rain >= threshold
+        interior = self._erode_mask(advected_active & target_active, radius=1)
+        birth = (~advected_active) & target_active
+        death = advected_active & (~target_active)
+        dilated_union = self._dilate_mask(advected_active | target_active, radius=1)
+        edge = dilated_union & ~(interior | birth | death)
+        clear = ~(interior | edge | birth | death)
+        return {
+            'interior': interior,
+            'edge': edge,
+            'birth': birth,
+            'death': death,
+            'clear': clear,
+        }
+
+    def _build_regime_labels(self, oracle_source, interior):
+        delta = float(self.hparams.get('evolution_regime_delta', 0.5))
+        labels = torch.full(
+            oracle_source.shape, -100, dtype=torch.long,
+            device=oracle_source.device)
+        labels = torch.where(
+            interior & (oracle_source > delta),
+            torch.zeros_like(labels), labels)
+        labels = torch.where(
+            interior & (oracle_source.abs() <= delta),
+            torch.ones_like(labels), labels)
+        labels = torch.where(
+            interior & (oracle_source < -delta),
+            torch.full_like(labels, 2), labels)
+        return labels
+
+    @staticmethod
+    def _balanced_regime_loss(regime_logits, labels):
+        logits = regime_logits.permute(0, 1, 3, 4, 2).reshape(-1, 3)
+        flat_labels = labels.reshape(-1)
+        valid = flat_labels != -100
+        if not torch.any(valid):
+            return logits.sum() * 0.0
+        valid_labels = flat_labels[valid]
+        counts = torch.bincount(valid_labels, minlength=3).to(logits.dtype)
+        weights = counts.sum() / (3.0 * counts.clamp_min(1.0))
+        weights = torch.where(counts > 0, weights, torch.zeros_like(weights))
+        return torch.nn.functional.cross_entropy(
+            logits[valid], valid_labels, weight=weights)
+
+    @staticmethod
     def _pixel_weighted_state_loss(error, active, mask16, mask32,
                                    increment16=1.0, increment32=1.0,
                                    max_weight=3.0):
@@ -144,6 +225,140 @@ class EvolutionConvLSTM(Base_method):
         weights = weights.clamp_max(float(max_weight))
         loss = (error * weights).sum() / weights.sum().clamp_min(1.0)
         return loss, weights
+
+    def _factorized_source_terms(self, result, batch_y):
+        batch_y = batch_y[:, :result['prediction'].shape[1]]
+        operator = self.model.operator
+        target_rain = normalized_dbz_to_rain(
+            batch_y, value_scale=operator.value_scale,
+            zr_a=operator.zr_a, zr_b=operator.zr_b)
+        advected_rain = result['advected_rain'].detach()
+        oracle_source = target_rain - advected_rain
+        masks = self._build_physical_region_masks(advected_rain, target_rain)
+        interior = masks['interior']
+        labels = self._build_regime_labels(oracle_source, interior)
+
+        regime_loss = self._balanced_regime_loss(result['regime_logits'], labels)
+        growth_mask = labels == 0
+        steady_mask = labels == 1
+        decay_mask = labels == 2
+        growth_target = (
+            oracle_source / result['positive_capacity'].detach().clamp_min(1e-6)
+        ).clamp(0.0, 1.0)
+        decay_target = (
+            -oracle_source / advected_rain.clamp_min(1e-6)
+        ).clamp(0.0, 1.0)
+        growth_error = torch.nn.functional.smooth_l1_loss(
+            result['growth_fraction'], growth_target, reduction='none',
+            beta=float(self.hparams.get('evolution_magnitude_huber_beta', 0.05)))
+        decay_error = torch.nn.functional.smooth_l1_loss(
+            result['decay_fraction'], decay_target, reduction='none',
+            beta=float(self.hparams.get('evolution_magnitude_huber_beta', 0.05)))
+        magnitude_loss = (
+            self._masked_mean(growth_error, growth_mask)
+            + self._masked_mean(decay_error, decay_mask))
+
+        masked_source = result['net_source'] * interior.to(result['net_source'].dtype)
+        masked_evolved_rain = (result['advected_rain'] + masked_source).clamp_min(0.0)
+        state_error = torch.nn.functional.smooth_l1_loss(
+            masked_evolved_rain, target_rain, reduction='none',
+            beta=float(self.hparams.get('evolution_state_huber_beta', 1.0)))
+        event_rain = torch.maximum(advected_rain, target_rain)
+        state_active = interior & (event_rain >= float(self.hparams.get(
+            'evolution_source_active_threshold', 0.1)))
+        state_loss, pixel_weights = self._pixel_weighted_state_loss(
+            state_error, state_active, state_active & (event_rain >= 16.0),
+            state_active & (event_rain >= 32.0),
+            increment16=self.hparams.get('evolution_pixel_16_increment', 1.0),
+            increment32=self.hparams.get('evolution_pixel_32_increment', 1.0),
+            max_weight=self.hparams.get('evolution_pixel_max_weight', 3.0))
+        loss = (float(self.hparams.get('evolution_regime_loss_weight', 1.0))
+                * regime_loss
+                + float(self.hparams.get('evolution_magnitude_loss_weight', 1.0))
+                * magnitude_loss
+                + float(self.hparams.get('evolution_state_loss_weight', 0.2))
+                * state_loss)
+        if 'edge_flow' in result:
+            edge_error = torch.nn.functional.smooth_l1_loss(
+                result['advected_rain'], target_rain, reduction='none',
+                beta=float(self.hparams.get('evolution_edge_huber_beta', 1.0)))
+            edge_loss = self._masked_mean(edge_error, masks['edge'])
+            edge_smooth = self._spatial_smoothness(result['edge_flow'])
+            loss = (loss
+                    + float(self.hparams.get('evolution_edge_loss_weight', 0.2))
+                    * edge_loss
+                    + float(self.hparams.get('evolution_edge_smooth_weight', 0.01))
+                    * edge_smooth)
+        else:
+            edge_loss = loss.new_zeros(())
+            edge_smooth = loss.new_zeros(())
+
+        with torch.no_grad():
+            predicted_class = result['regime_probability'].argmax(dim=2)
+            label_2d = labels.squeeze(2)
+            class_masks = [label_2d == index for index in range(3)]
+            pred_masks = [predicted_class == index for index in range(3)]
+            f1_values = []
+            precision_values = []
+            recall_values = []
+            eps = result['net_source'].new_tensor(1e-6)
+            for index in range(3):
+                tp = (pred_masks[index] & class_masks[index]).sum().to(eps.dtype)
+                fp = (pred_masks[index] & ~class_masks[index]
+                      & (label_2d != -100)).sum().to(eps.dtype)
+                fn = (~pred_masks[index] & class_masks[index]).sum().to(eps.dtype)
+                precision = tp / (tp + fp + eps)
+                recall = tp / (tp + fn + eps)
+                precision_values.append(precision)
+                recall_values.append(recall)
+                f1_values.append(2.0 * precision * recall / (
+                    precision + recall + eps))
+            predicted_growth = masked_source.clamp_min(0.0)
+            predicted_decay = (-masked_source).clamp_min(0.0)
+            oracle_growth = oracle_source.clamp_min(0.0)
+            oracle_decay = (-oracle_source).clamp_min(0.0)
+            values = {
+                'loss': loss,
+                'regime_loss': regime_loss,
+                'magnitude_loss': magnitude_loss,
+                'state_loss': state_loss,
+                'interior_state_mae': self._masked_mean(
+                    (masked_evolved_rain - target_rain).abs(), interior),
+                'regime_macro_f1': torch.stack(f1_values).mean(),
+                'growth_precision': precision_values[0],
+                'growth_recall': recall_values[0],
+                'decay_precision': precision_values[2],
+                'decay_recall': recall_values[2],
+                'growth_source_scale_ratio': (
+                    self._masked_mean(predicted_growth, growth_mask)
+                    / (self._masked_mean(oracle_growth, growth_mask) + eps)),
+                'decay_source_scale_ratio': (
+                    self._masked_mean(predicted_decay, decay_mask)
+                    / (self._masked_mean(oracle_decay, decay_mask) + eps)),
+                'interior_fraction': interior.float().mean(),
+                'growth_fraction': growth_mask.float().mean(),
+                'steady_fraction': steady_mask.float().mean(),
+                'decay_fraction': decay_mask.float().mean(),
+                'edge_source_abs': self._masked_mean(
+                    result['net_source'].abs(), masks['edge']),
+                'birth_source_abs': self._masked_mean(
+                    result['net_source'].abs(), masks['birth']),
+                'clear_source_abs': self._masked_mean(
+                    result['net_source'].abs(), masks['clear']),
+                'pixel_weight_mean': self._masked_mean(pixel_weights, state_active),
+                'edge_transport_loss': edge_loss,
+                'edge_flow_abs': (result['edge_flow'].abs().mean()
+                                  if 'edge_flow' in result else edge_loss),
+            }
+        values.update({
+            'loss': loss,
+            'regime_loss': regime_loss,
+            'magnitude_loss': magnitude_loss,
+            'state_loss': state_loss,
+            'edge_transport_loss': edge_loss,
+            'edge_smooth_loss': edge_smooth,
+        })
+        return values
 
     def _bounded_state_terms(self, result, batch_y):
         batch_y = batch_y[:, :result['prediction'].shape[1]]
@@ -232,8 +447,30 @@ class EvolutionConvLSTM(Base_method):
                      on_epoch=True, prog_bar=name == 'loss')
         return values['loss']
 
+    def _factorized_source_training_step(self, batch_x, batch_y):
+        free_rollout = bool(self.hparams.get(
+            'evolution_free_rollout_training', False))
+        result = self.model(
+            batch_x, return_aux=True,
+            teacher_forcing=None if free_rollout else batch_y)
+        values = self._factorized_source_terms(result, batch_y)
+        if free_rollout:
+            target = batch_y[:, :result['prediction'].shape[1]]
+            rollout_loss = self.validation_criterion(
+                result['prediction'], target)
+            values['loss'] = (values['loss'] + float(self.hparams.get(
+                'evolution_rollout_loss_weight', 1.0)) * rollout_loss)
+            values['rollout_loss'] = rollout_loss
+        for name, value in values.items():
+            self.log(f'train_{name}', value, on_step=name == 'loss',
+                     on_epoch=True, prog_bar=name == 'loss')
+        return values['loss']
+
     def training_step(self, batch, batch_idx):
         batch_x, batch_y = batch
+        if (getattr(self.model, 'use_source', False)
+                and self.model.source_parameterization == 'factorized_regime'):
+            return self._factorized_source_training_step(batch_x, batch_y)
         if (getattr(self.model, 'use_source', False)
                 and self.model.source_parameterization == 'bounded_state'):
             return self._bounded_source_training_step(batch_x, batch_y)
@@ -350,6 +587,26 @@ class EvolutionConvLSTM(Base_method):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        if (getattr(self.model, 'use_source', False)
+                and self.model.source_parameterization == 'factorized_regime'):
+            batch_x, batch_y = batch
+            steps = self.model.forecast_steps
+            target = batch_y[:, :steps]
+            free_rollout = bool(self.hparams.get(
+                'evolution_free_rollout_training', False))
+            result = self.model(
+                batch_x, return_aux=True,
+                teacher_forcing=None if free_rollout else batch_y)
+            loss = self.validation_criterion(result['prediction'], target)
+            self.log('val_loss', loss, on_step=True, on_epoch=True,
+                     prog_bar=False)
+            if self.hparams.dataname == 'bth_radar':
+                self._update_val_precipitation(result['prediction'], target)
+            values = self._factorized_source_terms(result, target)
+            for name, value in values.items():
+                self.log(f'val_tf_{name}', value, on_step=False,
+                         on_epoch=True, prog_bar=False)
+            return loss
         if (getattr(self.model, 'use_source', False)
                 and self.model.source_parameterization == 'bounded_state'):
             batch_x, batch_y = batch

@@ -73,6 +73,13 @@ class BestCheckpointCallback(ModelCheckpoint):
         self.alias_name = alias_name
         super().__init__(*args, **kwargs)
 
+    @property
+    def state_key(self):
+        # Lightning requires distinct state keys when several checkpoint
+        # monitors are registered on the same trainer.
+        monitor = self.monitor or 'none'
+        return f'{self.__class__.__qualname__}[{monitor}][{self.alias_name}]'
+
     def on_validation_end(self, trainer, pl_module):
         super().on_validation_end(trainer, pl_module)
         if self.best_model_path and trainer.global_rank == 0:

@@ -147,6 +147,87 @@ class EvolutionOperator(nn.Module):
             'evolved_rain': evolved_rain,
         }
 
+    def evolve_factorized_step(self, field, flow, regime_logits,
+                               growth_fraction, decay_fraction,
+                               positive_capacity, source_mask=None):
+        """Advect and mix growth/steady/decay rain-rate candidate states.
+
+        ``regime_logits`` has three channels ordered as growth, steady, decay.
+        ``growth_fraction`` and ``decay_fraction`` are raw logits mapped through
+        sigmoid so the source/sink magnitudes stay within physical bounds.
+        """
+        if self.field_space != 'rain_rate':
+            raise ValueError(
+                'factorized physical source requires field_space="rain_rate"')
+        if field.ndim != 4 or flow.ndim != 4 or flow.shape[1] != 2:
+            raise ValueError('field must be [B,C,H,W] and flow [B,2,H,W]')
+        if regime_logits.ndim != 4 or regime_logits.shape[1] != 3:
+            raise ValueError('regime_logits must have shape [B,3,H,W]')
+        expected = field.shape
+        for name, value in (('growth_fraction', growth_fraction),
+                            ('decay_fraction', decay_fraction)):
+            if tuple(value.shape) != tuple(expected):
+                raise ValueError(f'{name} must have shape {tuple(expected)}')
+
+        transport_input = field.detach() if self.stop_gradient else field
+        advected = self.warp(transport_input, flow)
+        advected_rain = normalized_dbz_to_rain(
+            advected, value_scale=self.value_scale,
+            zr_a=self.zr_a, zr_b=self.zr_b)
+        capacity = torch.as_tensor(
+            positive_capacity, device=advected_rain.device,
+            dtype=advected_rain.dtype)
+        if capacity.ndim == 0:
+            capacity = torch.full_like(advected_rain, float(capacity))
+        if tuple(capacity.shape) != tuple(expected):
+            raise ValueError(
+                f'positive_capacity must be scalar or shape {tuple(expected)}')
+        capacity = torch.minimum(
+            capacity.clamp_min(0.0),
+            (self.max_rain - advected_rain).clamp_min(0.0))
+
+        regime_probability = torch.softmax(regime_logits, dim=1)
+        growth_alpha = torch.sigmoid(growth_fraction)
+        decay_alpha = torch.sigmoid(decay_fraction)
+        growth_source = growth_alpha * capacity
+        sink = decay_alpha * advected_rain
+        growth_state = advected_rain + growth_source
+        steady_state = advected_rain
+        decay_state = (advected_rain - sink).clamp_min(0.0)
+        mixed_rain = (
+            regime_probability[:, 0:1] * growth_state
+            + regime_probability[:, 1:2] * steady_state
+            + regime_probability[:, 2:3] * decay_state)
+
+        net_source = mixed_rain - advected_rain
+        if source_mask is not None:
+            if tuple(source_mask.shape) != tuple(expected):
+                raise ValueError(
+                    f'source_mask must have shape {tuple(expected)}')
+            net_source = net_source * source_mask.to(net_source.dtype)
+            mixed_rain = advected_rain + net_source
+        evolved_rain = mixed_rain.clamp_min(0.0)
+        prediction = rain_to_normalized_dbz(
+            evolved_rain, value_scale=self.value_scale,
+            zr_a=self.zr_a, zr_b=self.zr_b)
+        return {
+            'prediction': prediction,
+            'advected': advected,
+            'advected_rain': advected_rain,
+            'regime_probability': regime_probability,
+            'growth_fraction': growth_alpha,
+            'decay_fraction': decay_alpha,
+            'growth_state': growth_state,
+            'steady_state': steady_state,
+            'decay_state': decay_state,
+            'growth_source': growth_source,
+            'sink': sink,
+            'net_source': net_source,
+            'source_rain': net_source,
+            'positive_capacity': capacity,
+            'evolved_rain': evolved_rain,
+        }
+
     def forward(self, initial_field, incremental_flow, source=None):
         if incremental_flow.ndim != 5 or incremental_flow.shape[2] != 2:
             raise ValueError('incremental_flow must be [B,T,2,H,W]')

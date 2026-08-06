@@ -1,398 +1,908 @@
-# R4-c2 源汇机制验证计划
+# 现阶段的核心目标
 
-状态：待实施  
-阶段：R4 - 运动—源汇分解  
-更新日期：2026-08-05
+目前先不要追求“完整 20 帧预测的 CSI 立刻提高”，而应先回答三个机制问题：
 
-## 1. 阶段结论
+1. **已有降水内部的增强与减弱能否被 Radar 历史辨识；**
+2. **边缘形变究竟应由运动项还是源汇项承担；**
+3. **单步正确的源汇机制能否在递归过程中保持稳定。**
 
-下一步停止继续训练 R4-c1，不直接解冻 encoder 或 motion，也不引入 PWV、DEM
-或新的时序主干。启动新的 R4-c2 机制实验：固定已经验证的 R4-b 运输骨架，
-把 source 重构为逐 lead、状态条件化、物理有界的 signed tendency，并先在
-teacher-forced 路径上验证它是否真的学会非平流的降水增强和衰减。
+当前 R4-b 运动基线已经证明平流骨架可用，但第二小时明显丢失强度：强度比从第一小时的 0.8915 降到第二小时的 0.7376，CSI@32 在 1–2 h 只有 0.0092。因此确实需要非平流强度演化机制，但它必须提高 POD 和强度保持，同时避免再次制造大面积虚警。
 
-本阶段的核心问题是：**在冻结且已校准的 Radar 运动场下，逐步状态条件化、物理
-有界的 signed tendency 模块，能否从 Radar 历史中预测可辨识的非平流强度变化，
-在不依赖边缘位移补偿、不破坏运动分支空间优势的条件下，改善 16/32 mm/h 降水
-的增强、维持、减弱、新生和消散？**
+R4-c2 的问题也已经很明确：不是 source 太小，而是模型学成了“强区统一加雨”。16/32 mm/h 区域几乎全部得到正 source，growth 和 decay 的符号分布却非常接近，完整 rollout 强度比膨胀到 5 倍以上，FAR 接近 1。
 
-source 不是锐化器或双线性插值的专用反模糊模块。数值 warp 扩散和真实非平流
-生消是两个不同来源；本阶段允许 source 顺带恢复部分强核，但必须辨别它主要在
-表达对象内部强度变化与真实新生/消散，还是在对象边缘形成正负偶极以修补 flow
-和插值误差。后者不能单独作为源汇机制成立的证据。
+因此，下一阶段不应该继续训练现有 signed source，而应该进入一个新的、严格分阶段的 **Radar-only 机制识别阶段**。
 
-R4-c0 已给出继续研究 source 的依据：强降水缺失残差显著，增强区以正残差为主、
-衰减区以负残差为主，训练与验证分布一致，且 32 mm/h 区域的 oracle source
-绝对值 P99 约为 33--35 mm/h。R4-c1 的失败不视为 source 机制无效，而视为当前
-参数化、条件输入和训练路径不足。
+---
 
-已观测的 oracle residual 量级也不是可忽略的插值噪声：active 区绝对均值约
-0.582 mm/h，16 mm/h 区约 6.458 mm/h，32 mm/h 区约 9.607 mm/h；growth 区
-72.6% 为正、decay 区 76.3% 为负。但这些残差仍混有 flow 剩余误差、形态变化、
-分裂合并、插值误差和不可预测变化，不能被称为纯物理 source 真值。
+# 一、固定实验协议
 
-## 2. 固定边界
+后续所有机制实验固定：
 
-以下内容在 R4-c2 Gate 1 结束前保持不变：
+| 项目       | 固定设置                         |
+| -------- | ---------------------------- |
+| 数据       | 仅 Radar                      |
+| 输入输出     | 10→20，6 min/帧                |
+| 数据划分     | 当前事件级 Train/Val/Test         |
+| 开发阶段     | 只使用 Train/Val，不访问 Test       |
+| 运动骨架     | 冻结 R4-b `.640662` checkpoint |
+| 演化空间     | rain-rate 空间                 |
+| Z–R      | 固定 (Z=200R^{1.6})            |
+| 第一阶段预测长度 | 只预测 1 帧                      |
+| 优化参数     | 只训练新增机制分支                    |
+| 判断依据     | 中间机制指标优先于总体 CSI              |
 
-- 使用 R4-b checkpoint：
-  `work_dirs/bth_r4b_motion_rainrate_scale05_ft5ep_from0633323_seed0/checkpoints/val-csi-epoch=01-val_csi_score=0.640662.ckpt`。
-- encoder、motion head 和已选择的 0.5 flow 标定全部冻结。
-- 任务仍为 10 帧历史预测 20 帧未来，每帧间隔 6 分钟，网格为 66 x 70。
-- source 和演化计算在 rain-rate 空间进行；Z-R 固定为 `Z=200R^1.6`。
-- 使用现有 `RADAR_CACHE_UINT8` 和 `.research/bth_2025_events.json`。
-- 保持事件级 train/val/test 划分；不得将重叠滑窗随机拆分到不同集合。
-- 只用 train 选择结构、权重和阈值，val 用于机制确认，暂不访问 test。
-- Gate 1 不加入 PWV、DEM、双 source/sink head 或新时序 backbone。
-- Gate 1 不用 source L1 和时间 TV；oracle residual 只作诊断或弱辅助。
+当前代码已经支持 rain-rate 平流、正负有界 source、零 source 与 R4-b 完全兼容，因此不需要重写整个 evolution operator，只需要新增更合理的 source 参数化。
 
-R4-b 是固定基线，R4-c1 是已知失败对照。不得覆盖两者的 checkpoint、配置或
-报告目录。当前未提交的
-`.research/history/r4c0_r4c1_source_analysis.md` 也不在本计划的修改范围内。
+仓库里的 `ConvLSTM_evolution_source_s1_pixel_weighted.py` 已经冻结 encoder 和 motion，只执行第一步预测，是下一轮实验最合适的配置起点。
 
-## 3. 目标参数化
+---
 
-对每个 lead `t`，先得到当前平流后的雨强 `A_t`，source decoder 输出 logit
-`z_t`。当前 50 dBZ 表示上限在固定 `Z=200R^1.6` 下对应
-`R_max = ((10^(50/10))/200)^(1/1.6) ~= 48.6 mm/h`，因此正 source 的可用容量为：
+# 二、R4-d0：先重新构造“机制标签”
 
-```text
-u_t = tanh(z_t)
-C_t+ = min(S_max, max(R_max - A_t, 0))
+## 1. 计算 teacher-forced 物理残差
 
-S_t = C_t+ * u_t,   u_t >= 0
-S_t = A_t * u_t,    u_t < 0
+保持 R4-b 运动场不变：
 
-R_t = A_t + S_t
-```
+[
+A_t=\mathcal W(R_{t-1}^{true},v_t^{R4b})
+]
 
-其中 `S_max = 35 mm/h`。实现应使用张量运算保持分段两侧可求导，且不再在结果
-上调用 `clamp_min(0)`。该表达必须满足：
+其中：
 
-- `z_t = 0` 时 `S_t = 0`，模型逐像素复现 R4-b；
-- `0 <= S_t <= min(35 mm/h, R_max-A_t)`（正分支）；
-- `-A_t <= S_t <= 0`（负分支）；
-- `0 <= R_t <= R_max`，sink 和超上限 source 均无法被额外 clamp 隐藏；
-- 只有一个 signed 自由度，不允许 source 和 sink 同时增大后相互抵消。
+* (R_{t-1}^{true})：真实上一帧；
+* (v_t^{R4b})：冻结的运动场；
+* (A_t)：只考虑平流后的降水场。
 
-`rain_to_normalized_dbz` 当前会把输出裁剪到 `[0,1]`。bounded source 必须在进入
-该转换前满足上下界，使转换函数的 clamp 只保留为数值防护，而不是模型机制的一
-部分。使用 `torch.where(u >= 0, ...)` 时零点选择正分支，左右梯度尺度分别受正容量
-和 `A_t` 控制；该零点不光滑性作为 Gate 0 的显式检查项，不能假定零初始化自然
-无偏。
+定义 oracle source：
 
-共享的逐步 decoder 定义为：
+[
+S_t^*=R_t^{true}-A_t
+]
 
-```text
-z_t = D_s(F, A_t, v_t, delta_recent, e_t)
-```
+但这次不能把全部 (S_t^*) 当作同一种 source 标签，因为它混合了：
 
-`F` 是冻结 encoder 的最后历史特征；`A_t` 是本 lead 的平流雨强；`v_t` 是固定
-motion head 给出的二维 flow；`e_t` 是 lead embedding；`delta_recent` 在 c2b
-才启用，包括 `R_0-R_-1` 和 `R_0-R_-5`。
+* 降水内部增强；
+* 降水内部减弱；
+* 对象边缘形变；
+* 对流新生；
+* 对流消散；
+* 剩余运动误差；
+* 双线性插值误差。
 
-拼接和主要卷积在 patch 分辨率完成，输入归一化固定如下：
+## 2. 对空间区域进行物理分区
 
-- `A_t` 用 `A_t/R_max` 作为首选基线；若改用 `log1p(A_t)/log1p(R_max)`，必须作为
-  独立配置消融，不得静默替换。
-- 雨强和 tendency 使用 area pooling 对齐 patch 网格。
-- 全分辨率像素单位的 flow 用 bilinear 降采样；`patch_size=2` 时位移同步除以 2，
-  再除以 patch 网格最大位移得到无量纲 flow。
-- `R_0-R_-1` 与 `R_0-R_-5` 先在 rain-rate 空间计算，再以 train split 分位数或
-  `S_max` 归一化并截断；采用的尺度写入配置快照。
-- lead embedding 扩展到 patch 网格；decoder 输出 logit 再上采样到原始网格，
-  最后应用物理有界变换。
+令：
 
-所有缩放常数和插值模式都必须进入配置或固定代码注释，确保实验可复现。
+[
+M_A=A_t\geq 0.1
+]
 
-## 4. 代码改动范围
+[
+M_Y=R_t^{true}\geq 0.1
+]
 
-### 4.1 演化算子
+构造五个互斥区域。
 
-文件：`openstl/modules/evolution_operator.py`
+### Persistent interior：持续存在对象内部
 
-- 增加由 `source_logit`（或等价的 `u_t`）和 `A_t` 计算 bounded signed source
-  的单步函数，集中维护物理约束。
-- source 路径返回 `advected_rain`、`source_rain`、`evolved_rain` 和必要的诊断量。
-- 有界路径在 rain-rate 到 normalized dBZ 转换前断言或统计 `R_t` 的上下界，避免
-  转换函数的 `[0,1]` clamp 静默吸收超限值。
-- 保留无 source 路径的现有行为，确保旧配置和 R4-b 不回归。
-- 有界 source 路径移除结果端 `clamp_min(0)`；旧 R4-c1 路径如需保留，应由显式
-  配置区分，避免静默改变历史实验语义。
+[
+M_{\text{interior}}
+===================
 
-### 4.2 模型与逐步 decoder
+\operatorname{Erode}(M_A\cap M_Y,1)
+]
 
-文件：`openstl/models/evolution_convlstm_model.py`
+这是第一阶段最重要的区域。对象内部受边缘位移误差影响较小，比较适合检验真正的强度增强和减弱。
 
-- 用共享的小型 per-step source decoder 替代“一次从 `F` 输出未来 20 帧 source”。
-- motion head 仍一次生成固定的未来 flow；source decoder 在每个 lead 接收本步
-  `A_t` 和 `v_t`，因此 source 预测必须位于演化循环内部。
-- 增加 lead embedding，长度至少覆盖配置中的 `aft_seq_length`。
-- c2a 输入：`F, A_t, v_t, e_t`。
-- c2b 在 c2a 基础上加入 `R_0-R_-1` 和 `R_0-R_-5`。
-- decoder 最后一层零初始化；加载 R4-b 后首次前向必须严格产生零 source。
-- `forward` 应能明确选择 rollout 与 teacher-forced previous-state 路径，并返回
-  两条路径需要的辅助张量，避免训练方法在模型外复制演化逻辑。
-- 保留旧 checkpoint 的非严格加载能力，并记录实际加载、缺失和新增参数。
+### Edge band：对象边缘
 
-### 4.3 训练方法
+[
+M_{\text{edge}}
+===============
 
-文件：`openstl/methods/evolution_convlstm.py`
+## \operatorname{Dilate}(M_A\cup M_Y,1)
 
-- Gate 1 的主路径按 lead 使用真实上一帧：
-  `A_t^TF = Warp(R_(t-1)^true, v_t)`，其中第一个 lead 的 previous state 为最后一帧
-  历史观测。
-- 主损失直接比较 `R_hat_t^TF` 与 `R_t^true`，不把 oracle source 当作纯净标签。
-- Gate 1 主损失是在 rain-rate 空间直接计算的区域 Huber（或单独配置的
-  Charbonnier）状态损失，不直接复用包含 soft CSI、空事件惩罚和分时段权重的
-  完整 R2 loss。对区域 mask `M` 定义：
+M_{\text{interior}}
+]
 
-  ```text
-  L_M = sum(M * rho(R_hat_t^TF - R_t^true)) / max(sum(M), 1)
-  L_state = L_active + lambda_16*L_16 + lambda_32*L_32
-  ```
+这里暂时不训练 source。
 
-- 同时独立记录 `L_all`、`L_active`、`L_16`、`L_32`；各 mask、Huber beta 和
-  `lambda_16/lambda_32` 必须在 train-only smoke 后预注册，不能看完 val 后调整。
-- soft CSI 只作诊断；若以后加入优化目标，作为独立消融。
-- oracle residual 保留为 detached 诊断；若后续试验弱辅助，必须另建可消融配置，
-  不与 c2a/c2b 主结果混写。
-- Gate 1 中 source sparse L1 和 temporal TV 权重为 0；空间平滑默认为 0，只有出现
-  明确棋盘伪影时才允许以独立实验加入极小权重。
-- optimizer 明确包含 source decoder 和 lead embedding，且只允许这些参数更新。
-- 增加 source 正负比例、绝对值均值/P50/P90/P99、按 lead 和强度区间分布，以及
-  `evolved_rain>R_max`、转换后 dBZ 等于 1、正 source 容量触发、sink 清空到 0 的
-  比例等日志。
+### Newborn：新生区域
 
-### 4.4 配置
+[
+M_{\text{birth}}=(\neg M_A)\cap M_Y
+]
 
-新增配置，不修改 R4-c1 原配置：
+### Dissipated：消散区域
 
-- `configs/bth_radar/ConvLSTM_evolution_source_c2a_tf.py`
-- `configs/bth_radar/ConvLSTM_evolution_source_c2b_tf.py`
-- Gate 2 通过批准后再新增
-  `configs/bth_radar/ConvLSTM_evolution_source_c2c_mixed.py`。
+[
+M_{\text{death}}=M_A\cap(\neg M_Y)
+]
 
-配置项应显式表达 source 参数化版本、decoder 输入、lead embedding 维度、训练
-路径、冻结策略、state loss 权重和 scheduled-sampling 策略，禁止依赖无法从运行
-产物恢复的隐式默认值。
+### Clear background：持续无降水
 
-### 4.5 测试
+[
+M_{\text{clear}}=(\neg M_A)\cap(\neg M_Y)
+]
 
-主要文件：
+## 3. 只在 persistent interior 中定义三分类
 
-- `tests/test_modules/test_evolution_operator.py`
-- `tests/test_models/test_evolution_convlstm.py`
-- 视职责新增 `tests/test_methods/test_evolution_convlstm.py`
-- `tests/test_configs/test_bth_evolution_convlstm_config.py`
+建议主阈值先设为：
 
-现有 R4-b 无 source 和 R4-c1 测试继续保留，新测试只补充 c2 行为。
+[
+\delta=0.5\ \mathrm{mm/h}
+]
 
-## 5. Gate 0：工程检查
+定义：
 
-Gate 0 是几十到几百步的工程验证，不得作为研究结论。
+[
+y=
+\begin{cases}
+\text{growth},&S_t^*>\delta\
+\text{steady},&|S_t^*|\leq\delta\
+\text{decay},&S_t^*<-\delta
+\end{cases}
+]
 
-### 5.1 单元与集成检查
+同时使用 (\delta=0.25) 和 (1.0) mm/h 做敏感性分析，但不因此重复完整训练。
 
-- 零初始化 c2 source 与 R4-b prediction、flow 逐像素一致。
-- 对随机和边界输入验证 `source_rain >= -A_t`、正 source 不超过
-  `min(35, R_max-A_t)`、`0 <= evolved_rain <= R_max`，并确认有界路径未依赖
-  结果端 clamp。
-- 人工构造 `z_t > 0` 与 `z_t < 0`，两侧 decoder 参数梯度均非零且有限。
-- 检查零初始化后的第一次更新：全场及 growth/decay 子集的梯度方向、source
-  正负比例和零附近 logit 分布；不得出现所有像素由分段零点统一推向正 source。
-- 每个 lead 的 decoder 输入和输出 shape 正确，同一共享 decoder 被重复调用。
-- 改变 `A_t` 或 lead id 时 source 输出可响应；固定输入时结果可复现。
-- teacher-forced 第一个 previous state 是 `R_0`，后续严格对应真实 `R_(t-1)`，
-  不存在一帧错位或未来信息进入 encoder。
-- source decoder 与 lead embedding 参数在 optimizer 中；encoder/motion 参数不在
-  optimizer 或 `requires_grad=False`。
-- R4-b checkpoint 加载后，对新增参数、缺失键和冻结参数进行断言。
-- 固定 batch 必须同时包含 growth、decay 和 16/32 mm/h 强回波；过拟合几十到几百
-  步后，teacher-forced state loss 至少下降 50%，growth/decay 符号准确率均相对
-  初始值明确提高，正负 source 都被激活，且 source 不大面积触及上下界。
-- 无 source、旧 source 配置的既有测试均通过。
+选择 0.5 而不是当前代码中的 0.1，是因为太靠近零点时，插值误差、Z–R 非线性和微小运动误差都会被错误地标记为增强或减弱。
 
-### 5.2 Gate 0 退出条件
+## 4. R4-d0 应输出的报告
 
-所有上述断言通过；没有 NaN/Inf；固定 batch loss 达到上述工程标准；显存可支持当前
-`batch_size=8`，否则只调整 batch size，不改变模型机制。任一物理约束、时间索引
-或冻结检查失败时停止，不启动正式训练。
-
-Gate 0 产物放入独立 smoke 目录，至少保存配置快照、Git 状态、checkpoint 加载
-摘要、首末 loss、梯度统计和一个 batch 的 source 分布。
-
-## 6. Gate 1：Teacher-forced 机制实验
-
-### 6.1 实验顺序
-
-1. **R4-c2a**：`F, A_t, v_t, e_t`，纯 teacher forcing。
-2. **R4-c2b**：在 c2a 上仅增加 `R_0-R_-1` 与 `R_0-R_-5`。
-3. 只有 c2a/c2b 的基础机制有效后，才允许做小型 decoder 容量调整；每次只改变
-   一个因素并保留独立配置与输出目录。
-
-先做短程 train-only smoke，再进行正式 train/val。结构与权重只能根据 train
-行为选择；val 只用于确认预先定义的机制判据，不用于反复搜索超参数。
-
-### 6.2 主损失与诊断
-
-主目标为 rain-rate 空间的 teacher-forced evolved-state loss：
+新增：
 
 ```text
-L_state = L_active + lambda_16*L_16 + lambda_32*L_32
+tools/diagnostics/r4d0_partition_oracle_source.py
 ```
 
-第一轮使用第 4.3 节定义的加权 Huber/Charbonnier，不混入完整 R2 loss、soft CSI、
-空事件惩罚、source L1 或 temporal TV。oracle source 定义为
-`R_t^true - A_t^TF`，只用于下列诊断：
-
-- growth (`oracle_source > threshold`) 中预测 source 的正值比例；
-- decay (`oracle_source < -threshold`) 中预测 source 的负值比例；
-- source 与 oracle residual 的符号一致率、相关性和分位数尺度；
-- 按 lead、事件和真值强度区间统计 source 分布。
-- 分别在 active、16、32、growth、decay 区计算
-  `E(|S_pred|)/(E(|S_oracle|)+epsilon)`，不以全场单一绝对均值判断量级。
-
-oracle residual 包含形变和 motion 误差，报告中必须继续标注它不是纯 source 真值。
-
-另外建立只用于机制诊断的空间分区，阈值、连通域和形态学宽度在 train-only smoke
-后预注册：
-
-| 空间分区 | 诊断目的 |
-|---|---|
-| persistent-object interior | 对象内部增强、维持与减弱 |
-| object edge band | 扩张、收缩、形态变化及可能的位移补偿 |
-| newborn | 真实上一帧/平流场无对象、目标帧出现对象 |
-| dissipated | 真实上一帧/平流场有对象、目标帧对象消失 |
-| clear background | source 应接近零 |
-
-分区由 truth 和固定 transport 结果构造，仅用于 detached 诊断，不作为 decoder 输入。
-额外计算 source 沿 flow 方向的正负邻接/偶极指标，并配合 source 空间图判断它是否
-主要在“旧位置减、新位置加”。
-
-### 6.3 预先定义的通过条件
-
-与零 source 的同一路径基线比较，Gate 1 至少要求：
-
-- train 和 val 的 active-region state loss 均有明确下降，且不是仅由背景改善造成；
-- 16/32 mm/h 区域 MAE 明显下降；
-- growth 区预测 source 主要为正，decay 区主要为负；
-- active 区 source 不再接近零，16/32、growth、decay 区的预测/oracle 绝对量级比
-  达到 train-only smoke 预注册的合理非零范围；不得以全场统一增雨达到该条件；
-- POD16/POD32 出现实质变化，不能只依靠 FAR 降低获得很小的 CSI 改善；
-- source 随 lead、强度和事件的分布合理，无全域恒正、恒负、边界饱和或 35 mm/h
-  大面积饱和；
-- source 不能主要集中在对象边缘形成沿 flow 的位移补偿偶极；对象内部
-  growth/decay 以及 newborn/dissipated 区必须呈现可分辨的独立贡献；
-- 全域误差、FAR、面积比和强度比没有出现足以否定机制的恶化。
-
-“明显/实质变化”在正式运行前用 train-only smoke 的方差确定数值容差，并写入
-运行配置或报告，不能看完 val 结果后修改标准。Gate 1 是机制门，不要求此时完整
-20 步 rollout CSI 已优于 R4-b。
-
-### 6.4 失败分流
-
-- c2a source 仍接近零：先查损失尺度、梯度、active mask 和 decoder 容量。
-- c2a 有量级但符号混乱：运行 c2b，检验历史 tendency 是否提供必要可辨识信息。
-- train 改善、val 不改善：检查事件过拟合和 decoder 容量，不解冻 motion。
-- source 大量触边：检查单位、归一化、插值与 state loss 权重，不提高 `S_max`。
-- c2b 仍不能改善 active/16/32 区域：停止进入 rollout，形成失败报告，再决定是否
-  需要更强历史表征或重新审视固定 motion 误差。
-
-## 7. Gate 2：混合状态训练
-
-仅在 Gate 1 通过并选定 c2a 或 c2b 后启动 R4-c2c。保留两条显式路径：
+输出：
 
 ```text
-L = lambda_TF * L_TF + lambda_roll * L_roll
+.research/r4d0_source_partition/
+├── region_counts.csv
+├── regime_counts.csv
+├── source_by_region.csv
+├── source_by_intensity.csv
+├── source_by_lead.csv
+├── source_histograms.png
+├── region_examples/
+└── summary.md
 ```
 
-训练初期以 teacher-forced 路径为主，随后按写入配置的 schedule 提高 rollout
-权重；最后才允许完整 20 步自由递归微调。scheduled sampling 不对真值和预测场
-做连续加权混合，而是按 sample 和 lead（不按像素）进行 Bernoulli 选择：
+至少统计：
+
+* growth、steady、decay 的样本比例；
+* 各区域 oracle source 的均值、绝对值均值、P50/P90/P95/P99；
+* 按 0.1–8、8–16、16–32、≥32 mm/h 分层；
+* persistent interior 中正负 source 的空间连续性；
+* edge 区 oracle residual 是否显著大于 interior；
+* newborn 是否主要集中在已有对象附近。
+
+这一阶段不训练模型。
+
+---
+
+# 三、R4-d1：已有降水的“增强—维持—减弱”分解
+
+这是当前最应该优先实现的机制。
+
+## 1. 不再输出一个 signed tendency
+
+当前实现是：
+
+[
+u_t=\tanh(z_t)
+]
+
+[
+S_t=
+\begin{cases}
+C_t^+u_t,&u_t\geq0\
+A_tu_t,&u_t<0
+\end{cases}
+]
+
+虽然物理上下界正确，但正负分支在零点附近的尺度不同，而且一个连续变量同时承担“判断方向”和“预测幅值”，很容易退化成当前的强区增雨策略。当前报告也已经将这种零点梯度不对称列为可能原因。
+
+建议拆成：
+
+### 方向分类
+
+[
+[p_t^+,p_t^0,p_t^-]
+===================
+
+\operatorname{Softmax}(z_t^+,z_t^0,z_t^-)
+]
+
+对应：
+
+* (p_t^+)：增强概率；
+* (p_t^0)：维持概率；
+* (p_t^-)：减弱概率。
+
+### 增强和减弱幅度
+
+[
+\alpha_t^+=\sigma(g_t),\qquad
+\alpha_t^-=\sigma(d_t)
+]
+
+构造三个候选状态：
+
+[
+R_t^{growth}
+============
+
+A_t+\alpha_t^+C_t^+
+]
+
+[
+R_t^{steady}=A_t
+]
+
+[
+R_t^{decay}
+===========
+
+(1-\alpha_t^-)A_t
+]
+
+最终状态：
+
+[
+\hat R_t
+========
+
+p_t^+R_t^{growth}
++
+p_t^0R_t^{steady}
++
+p_t^-R_t^{decay}
+]
+
+净 source 为：
+
+[
+\hat S_t=\hat R_t-A_t
+]
+
+这种写法的优势是：
+
+* 增强、维持、减弱显式竞争；
+* source 方向有明确概率解释；
+* 减弱永远不会使降水变成负数；
+* 即使分类不确定，输出仍是三个物理候选状态的凸组合；
+* 可以分别评价方向和幅值，不再只有一个模糊的 source loss。
+
+## 2. 增强上限不能继续直接使用全局 35 mm/h
+
+当前 `source_max_rain=35` 对单个 6 min 步长过于宽松，使模型很容易在强区施加大幅正 source。
+
+建议从 Train oracle source 中按 advected intensity 分箱：
+
+| (A_t) | 正 source 上限         |
+| ----- | ------------------- |
+| 0.1–8 | 该分箱正 source P95/P99 |
+| 8–16  | 该分箱正 source P95/P99 |
+| 16–32 | 该分箱正 source P95/P99 |
+| ≥32   | 该分箱正 source P95/P99 |
+
+定义：
+
+[
+C_t^+
+=====
+
+\min
+\left(
+Q^+*{\operatorname{bin}(A_t)},
+R*{\max}-A_t
+\right)
+]
+
+其中 (Q^+) 只从 Train 统计，Val 仅验证。
+
+这样仍允许强降水出现大 source，但模型不能把所有像素都推向全局最大值。
+
+## 3. source 只作用于 persistent interior
+
+第一轮：
+
+[
+\hat S_t=
+M_{\text{interior}}\hat S_t
+]
+
+在 edge、newborn、clear background 中强制：
+
+[
+\hat S_t=0
+]
+
+这是必要的机制隔离，不是最终模型设计。
+
+当前 R4-c2 直接在所有 active 区域学习 state loss，导致 edge、birth 和运动误差混在一起；失败报告已经明确建议先单独检验 matched persistent interior 的 growth/decay。
+
+## 4. 模型输入
+
+R4-d1a 只使用：
+
+[
+[F,\ A_t,\ v_t,\ |\nabla A_t|]
+]
+
+其中：
+
+* (F)：历史 Radar 的 ConvLSTM 特征；
+* (A_t)：平流后状态；
+* (v_t)：冻结运动场；
+* (|\nabla A_t|)：帮助模型识别对象内部和边缘。
+
+暂时不要再加入：
+
+[
+R_0-R_{-1},\qquad R_0-R_{-5}
+]
+
+因为 c2b 已经证明原始差分没有改变失败性质。原始差分包含大量位置移动，不是纯强度 tendency。
+
+## 5. 损失函数
+
+### 方向分类损失
+
+只在 persistent interior：
+
+[
+L_{\text{regime}}
+=================
+
+L_{\text{balanced-CE}}
+(\hat y,y)
+]
+
+三类采用逆频率或 effective-number 权重。
+
+每个 batch 中，growth、steady、decay 像素可以等量抽样计算分类损失，避免 steady 或 decay 主导。
+
+### 条件幅值损失
+
+只在真实 growth 像素监督 (\alpha^+)：
+
+[
+\alpha_t^{+,*}
+==============
+
+\frac{S_t^*}{C_t^+}
+]
+
+只在真实 decay 像素监督 (\alpha^-)：
+
+[
+\alpha_t^{-,*}
+==============
+
+\frac{-S_t^*}{A_t}
+]
+
+[
+L_{\text{magnitude}}
+====================
+
+L_{\text{Huber}}(\alpha_t^+,\alpha_t^{+,*})
++
+L_{\text{Huber}}(\alpha_t^-,\alpha_t^{-,*})
+]
+
+### 状态重建损失
+
+[
+L_{\text{state}}
+================
+
+L_{\text{Huber}}(\hat R_t,R_t^{true})
+]
+
+继续使用当前 1/2/3 的像素权重：
+
+* active：1；
+* ≥16 mm/h：2；
+* ≥32 mm/h：3。
+
+当前代码已经实现了这种 capped pixel-weighted state loss，可以直接复用。
+
+### 总损失
+
+初始建议：
+
+[
+L
+=
+
+L_{\text{regime}}
++
+L_{\text{magnitude}}
++
+0.2L_{\text{state}}
+]
+
+第一轮不要加：
+
+* source L1；
+* source TV；
+* soft CSI；
+* 完整 20-step forecast loss。
+
+因为当前首先要验证的是方向可辨识性，不是通过正则把 source 压小或压平。
+
+## 6. R4-d1 的通过条件
+
+这些是建议预注册的项目 Gate，不是领域通用标准：
+
+| 指标                   |                       通过标准 |
+| -------------------- | -------------------------: |
+| Growth sign accuracy |                      ≥0.60 |
+| Decay sign accuracy  |                      ≥0.60 |
+| Regime macro-F1      |              比多数类基线高 ≥0.10 |
+| Growth scale ratio   |                    0.5–1.5 |
+| Decay scale ratio    |                    0.5–1.5 |
+| Interior state MAE   |       比 zero-source 降低 ≥5% |
+| ≥16/32 区统一正 source   |                    不允许再次出现 |
+| Val loss             | 应和 mechanism metrics 同方向改善 |
+
+如果 growth 仍约 0.25、decay 约 0.75，即使 state loss 降低，也判定失败。
+
+---
+
+# 四、R4-d2：边缘形变与强度源汇分离
+
+R4-d1 通过后，下一步不是立刻加入 newborn，而是处理对象边缘。
+
+## 1. 为什么边缘应单独处理
+
+对象边缘上的 oracle source 可能只是：
+
+* flow 偏移半个像素；
+* 对象形状伸展；
+* 双线性平流造成的平滑；
+* 真实强度生消。
+
+如果让 intensity source 修复所有边缘误差，source 会自然学成“哪里位置没对齐，就加雨或减雨”。
+
+## 2. 加入 bounded local deformation
+
+保留 R4-b 粗运动：
+
+[
+v_t^{base}
+]
+
+新增一个只在 edge band 生效的局地运动残差：
+
+[
+\delta v_t
+==========
+
+0.25\tanh(f_{\text{edge}}(F,A_t,\nabla A_t))
+]
+
+[
+v_t^{final}
+===========
+
+v_t^{base}
++
+M_{\text{edge}}\delta v_t
+]
+
+每个 6 min 步长，局地残差限制为约 (\pm0.25) 像素，避免它取代原有运动场。
+
+新的平流状态：
+
+[
+A_t'
+====
+
+\mathcal W(R_{t-1},v_t^{final})
+]
+
+## 3. 训练方式
+
+仍然只做单步：
+
+* encoder 冻结；
+* base motion 冻结；
+* source 分支关闭；
+* 只训练 edge deformation head。
+
+损失：
+
+[
+L_{\text{edge}}
+===============
+
+L_{\text{Huber}}(A_t',R_t^{true};M_{\text{edge}})
++
+\lambda_g L_{\text{gradient}}
++
+\lambda_s L_{\text{smooth}}
+]
+
+其中：
+
+[
+L_{\text{smooth}}
+=================
+
+|\nabla\delta v_t|_1
+]
+
+## 4. R4-d2 Gate
+
+| 指标                      |     建议条件 |   |                |
+| ----------------------- | -------: | - | -------------- |
+| Edge-band transport MAE |   降低 ≥5% |   |                |
+| Edge-band oracle (      |      S^* | ) | 降低 ≥10%        |
+| 对象质心误差                  |      不恶化 |   |                |
+| 对象面积比                   |  0.9–1.1 |   |                |
+| Persistent interior MAE | 不恶化超过 1% |   |                |
+| (                       | \delta v | ) | 不长期饱和在 0.25 px |
+
+如果边缘 residual 没有明显下降，就不保留这个分支。
+
+---
+
+# 五、R4-d3：短时自由递归稳定性
+
+只有 R4-d1 单步源汇通过后，才进入递归。
+
+## 1. 不直接从 1 步跳到 20 步
+
+依次进行：
+
+[
+1\rightarrow3\rightarrow5\rightarrow10\rightarrow20
+]
+
+其中：
+
+* 1 步：纯 teacher-forced 机制识别；
+* 3 步：全部自由 rollout；
+* 5 步：全部自由 rollout；
+* 10/20 步：只有短 rollout 通过后才运行。
+
+3-step 训练时：
+
+[
+\hat R_1=f(R_0)
+]
+
+[
+\hat R_2=f(\hat R_1)
+]
+
+[
+\hat R_3=f(\hat R_2)
+]
+
+不能再让每一步都看到真实上一帧。
+
+当前失败的直接因果链就是：teacher forcing 中学习单步强区加雨，进入自由 rollout 后正 source 被持续平流并反复增强，最终造成面积和强度爆炸。
+
+## 2. 历史强度包络机制
+
+如果 factorized source 单步正确，但 3-step 仍持续累积，可以加入 Radar-only 的历史强度包络。
+
+构造：
+
+[
+H_0
+===
+
+\max_{\tau=-4,\dots,0}
+\operatorname{MaxPool}*{3\times3}(R*\tau)
+]
+
+用当前运动场把该包络平流至未来：
+
+[
+H_t=\mathcal W(H_{t-1},v_t)
+]
+
+增长候选状态不再直接趋向全局 (R_{\max})，而是：
+
+[
+C_t
+===
+
+\min(R_{\max},H_t+\Delta_t)
+]
+
+[
+R_t^{growth}
+============
+
+A_t+\alpha_t^+(C_t-A_t)_+
+]
+
+其中 (\Delta_t) 为小范围可学习的额外增长容量。
+
+物理含义是：
+
+> 历史雷达已经观测到的局地强度结构给出一个移动的强度背景，source 允许在此基础上增强，但不能每一步无条件向全局最大雨强推进。
+
+## 3. 递归 Gate
+
+每个阶段都检查：
+
+| 指标                |            建议条件 |
+| ----------------- | --------------: |
+| Intensity ratio   |       0.85–1.15 |
+| 强降水面积比            |         0.8–1.2 |
+| FAR@16/32 增量      |           ≤0.03 |
+| CSI@16/32         |     不低于同长度 R4-b |
+| Growth/decay sign | 不因 rollout 明显失效 |
+| 连续正 source        |    不随 lead 单调积累 |
+| source saturation |            接近 0 |
+
+3-step 不通过，就不进入 5-step，更不能使用 scheduled sampling 掩盖问题。
+
+---
+
+# 六、R4-d4：雷达可见的新生机制
+
+这一部分放在已有对象的增强/减弱通过之后。
+
+## 1. 不尝试预测完全无雷达前兆的对流新生
+
+只使用 Radar 时，对完全晴空中突然产生的对流缺乏环境信息。因此应把研究对象限定为：
+
+> **Radar-visible initiation：历史弱回波、局地回波增长或已有对象附近的新生。**
+
+候选区域可定义为：
+
+[
+M_{\text{candidate}}
+====================
+
+(M_{\text{history-max}}\ge0.1)
+\cup
+\operatorname{Dilate}(M_A,2)
+]
+
+其中：
+
+[
+M_{\text{history-max}}
+======================
+
+\max_{\tau=-9,\dots,0}R_\tau
+]
+
+## 2. 单独的新生门控
+
+[
+p_t^{birth}
+===========
+
+\sigma(f_{\text{birth}}(F,A_t))
+]
+
+[
+I_t^{birth}
+===========
+
+\alpha_t^{birth}I_{\max}
+]
+
+[
+R_t
+===
+
+R_t^{existing}
++
+(1-M_A)
+M_{\text{candidate}}
+p_t^{birth}
+I_t^{birth}
+]
+
+不允许 existing growth head 在无降水背景产生新回波。
+
+## 3. 评价指标
+
+新生属于稀有事件，不能只看准确率，应报告：
+
+* PR-AUC/AP；
+* newborn POD；
+* newborn FAR；
+* newborn FSS；
+* 新生对象质心误差；
+* 新生面积比；
+* clear-background false birth 面积。
+
+如果 AP 没有显著超过事件 prevalence，就说明 Radar-only 中缺乏足够的新生信息，不应强行保留这个模块。
+
+---
+
+# 七、建议的具体实验矩阵
+
+| 编号     | 实验                             |  预测长度 | 冻结部分                           | 目的                 |
+| ------ | ------------------------------ | ----: | ------------------------------ | ------------------ |
+| R4-d0  | Oracle source 空间分区             |   无训练 | 全部                             | 清理机制标签             |
+| R4-d1a | Factorized growth/steady/decay |     1 | encoder+motion                 | 验证方向可辨识性           |
+| R4-d1b | 分箱 source capacity             |     1 | encoder+motion                 | 防止全局强区增雨捷径         |
+| R4-d2  | Edge residual flow             |     1 | encoder+base motion            | 分离形变与强度            |
+| R4-d3a | Existing-cell source rollout   |     3 | encoder+motion                 | 检验递归稳定性            |
+| R4-d3b | Historical intensity envelope  |   3/5 | encoder+motion                 | 抑制正 source 累积      |
+| R4-d4  | Radar-visible initiation       |     1 | encoder+motion+existing source | 检验新生机制             |
+| R4-d5  | 完整组合                           | 10/20 | 先冻结，后谨慎联合                      | 最终 Radar-only 机制模型 |
+
+当前真正应该执行的只有：
+
+[
+\boxed{
+R4\text{-}d0
+\rightarrow
+R4\text{-}d1a
+\rightarrow
+R4\text{-}d1b
+}
+]
+
+R4-d1 不通过时，不做后续实验。
+
+---
+
+# 八、代码层面的修改方案
+
+## 1. `openstl/modules/evolution_operator.py`
+
+新增：
+
+```python
+def evolve_factorized_step(
+    field,
+    flow,
+    regime_logits,
+    growth_fraction,
+    decay_fraction,
+    positive_capacity,
+):
+    ...
+```
+
+返回：
+
+```python
+{
+    "prediction": prediction,
+    "advected_rain": advected_rain,
+    "regime_probability": regime_probability,
+    "growth_state": growth_state,
+    "steady_state": advected_rain,
+    "decay_state": decay_state,
+    "growth_source": growth_source,
+    "sink": sink,
+    "net_source": net_source,
+    "evolved_rain": evolved_rain,
+}
+```
+
+必须保留现有：
+
+* source-free；
+* legacy signed；
+* bounded-state
+
+三个路径，用于回归测试。
+
+## 2. `openstl/models/evolution_convlstm_model.py`
+
+新增参数：
+
+```python
+evolution_source_parameterization = "factorized_regime"
+```
+
+新增三个 head：
 
 ```text
-b_t ~ Bernoulli(p)
-R_(t-1)^input = R_(t-1)^true if b_t=1 else R_hat_(t-1)
+regime_head       -> 3 channels
+growth_head       -> 1 channel
+decay_head        -> 1 channel
 ```
 
-`p` 随训练逐步下降，其 schedule 和随机状态必须可由 checkpoint 恢复并写入日志；
-验证和推理始终使用确定性的完整 rollout。
+后续再增加：
 
-Gate 2 需要同时检查 teacher-forced 机制是否保留，以及误差累积时 source 是否
-开始补偿模型自身伪影。若 rollout 改善来自 source 全域增雨、FAR 或面积比明显恶化，
-则不通过。
+```text
+edge_flow_head
+birth_gate_head
+birth_intensity_head
+```
 
-## 8. 对照矩阵
+不要一次全部实现。
 
-| 实验 | 参数化 | Source 输入 | 训练路径 | 状态 |
-|---|---|---|---|---|
-| R4-b | 无 source | 无 | rollout | 固定基线 |
-| R4-c1 | signed + clamp | 仅 `F` | 旧联合损失 | 已有失败对照 |
-| R4-c2a | 有界 signed | `F,A_t,v_t,e_t` | teacher forcing | Gate 1 |
-| R4-c2b | 有界 signed | c2a + 历史 tendency | teacher forcing | Gate 1 |
-| R4-c2c | 最佳 c2 | 与胜出版本相同 | TF + rollout | Gate 2 |
+## 3. `openstl/methods/evolution_convlstm.py`
 
-“只替换 clamp、仍一次输出 20 帧”的版本仅可用于单元检查，不分配完整训练预算，
-因为它没有解决 source 对逐步状态开环的问题。
+新增：
 
-R4-c2a 相对 R4-c1 同时改变参数化、输入、逐步解码、主损失和训练路径；若成功，
-本阶段只能得出“R4-c2 整体机制设计有效”，不能把收益归因给其中单一改动。当前
-机制筛选不为每项改动分配完整实验预算；进入论文级结论前，c2a（无 tendency）与
-c2b（有 tendency）是最低限度必须保留的简化消融。
+```python
+_build_physical_region_masks()
+_build_regime_labels()
+_factorized_source_terms()
+_balanced_regime_loss()
+```
 
-## 9. 运行与记录规范
+记录：
 
-每次运行应使用新的 `work_dirs`，名称至少包含 `r4c2a/r4c2b/r4c2c`、训练路径、
-seed 和关键变体。运行前保存：
+```text
+growth_precision
+growth_recall
+decay_precision
+decay_recall
+regime_macro_f1
+growth_source_scale_ratio
+decay_source_scale_ratio
+interior_state_mae
+edge_source_abs
+birth_source_abs
+clear_source_abs
+```
 
-- 完整配置快照、命令、Git commit/status 和随机种子；
-- checkpoint 路径及校验信息；
-- train/val 事件和样本计数；
-- trainable/frozen 参数名、数量及 optimizer param groups；
-- source 单位、`S_max`、active/growth/decay 阈值和 flow 尺度。
+当前方法已经记录 source sign accuracy、scale ratio、正负像素比例和物理上界诊断，可以直接扩展，而不是另写一套评估系统。
 
-运行后至少保存：
+## 4. 配置文件
 
-- all/active/16/32 state loss 与 MAE；
-- CSI/POD/FAR/Frequency Bias、面积比、强度比，按 lead 和 0--1 h/1--2 h 分段；
-- source 正负比例、绝对值分位数、区域预测/oracle 量级比和饱和比例，按
-  lead/强度/事件分组；
-- growth/decay 符号一致率与 oracle residual 诊断；
-- interior/edge/newborn/dissipated/background 分区贡献及沿 flow 偶极诊断；
-- `evolved_rain>R_max`、normalized dBZ 等于 1、正上限触发和 sink 清空比例；
-- 典型成功和失败事件的 `truth / advected / source / evolved` 并排图；
-- 与 R4-b、R4-c1 使用相同口径的比较表。
+建议新增：
 
-Gate 阶段不触碰 test，不做三 seed 正式结论。R4-c2c 通过后再冻结方案，随后按
-seed 0/1/2 运行并进行事件级配对 bootstrap；只有这之后才讨论 PWV 对正 source
-的调制。
+```text
+configs/bth_radar/
+├── ConvLSTM_evolution_factorized_s1.py
+├── ConvLSTM_evolution_factorized_capacity_s1.py
+├── ConvLSTM_evolution_edge_flow_s1.py
+├── ConvLSTM_evolution_factorized_s3.py
+├── ConvLSTM_evolution_factorized_envelope_s5.py
+└── ConvLSTM_evolution_birth_s1.py
+```
 
-## 10. 执行清单
+不要覆盖原有 c1/c2 配置。
 
-- [ ] 为 bounded signed tendency 添加独立算子与边界/梯度测试。
-- [ ] 固定 `R_max`、输入归一化、pooling、flow 单位和零点梯度检查。
-- [ ] 实现共享 per-step source decoder、lead embedding 和 c2a 输入。
-- [ ] 实现模型内 teacher-forced 演化路径及时间索引测试。
-- [ ] 确认仅 source decoder/embedding 进入 optimizer，R4-b encoder/motion 冻结。
-- [ ] 完成 Gate 0 固定 batch 过拟合与全套回归测试。
-- [ ] 新增并运行 R4-c2a train-only smoke，冻结正式判据。
-- [ ] 运行 R4-c2a train/val 并形成机制报告。
-- [ ] 仅增加历史 tendency，运行 R4-c2b 并与 c2a 配对比较。
-- [ ] 完成 interior/edge/newborn/dissipated/background 与 flow 偶极诊断。
-- [ ] 根据 Gate 1 判据作出 go/no-go 决策。
-- [ ] Gate 1 通过后实现 R4-c2c mixed-state/scheduled sampling。
-- [ ] Gate 2 通过后再制定多 seed 与 PWV source modulation 计划。
+## 5. 定向测试
 
-## 11. 完成定义
+至少增加：
 
-本阶段完成不是“训练跑完”，而是得到一个可复核的机制结论：
+```text
+test_factorized_zero_initialization_matches_r4b
+test_growth_state_is_not_below_advected_state
+test_decay_state_is_not_above_advected_state
+test_decay_state_is_nonnegative
+test_regime_probabilities_sum_to_one
+test_source_is_zero_outside_interior_mask
+test_growth_and_decay_heads_receive_gradients
+test_edge_flow_is_zero_outside_edge_mask
+test_edge_flow_respects_displacement_bound
+test_three_step_free_rollout_uses_own_previous_prediction
+```
 
-- **Go**：有界、逐步状态条件化 source 在冻结 motion 下通过 Gate 1，并在 Gate 2
-  中保持机制方向且改善自由 rollout；随后冻结结构进入多 seed 验证。
-- **No-go**：c2a/c2b 在工程检查无误后仍不能改善 active/16/32 状态误差或不能
-  学到正确生消符号；停止 rollout 和多模态扩展，记录失败证据并重新评估历史表征、
-  固定 motion 误差或 source 可辨识性。
+---
 
-在任一结论之前，不以总 CSI 的微小变化替代机制证据，也不通过解冻 motion、增加
-训练 epoch 或加入 PWV 来掩盖 source decoder 本身是否有效的问题。
+# 九、现阶段明确不要做的事情
+
+暂时不要：
+
+* 继续训练 c2a/c2b；
+* 单纯增加 epoch 或学习率；
+* 直接解冻 motion；
+* 将 source loss 换成更多 L1/TV；
+* 直接加入 scheduled sampling；
+* 用完整场 MSE 掩盖 growth/decay 不可辨识；
+* 让 source 同时解释 interior、edge、newborn 和 clear background；
+* 直接进入 20-step；
+* 访问 Test；
+* 运行多 seed。
+
+仓库现有失败报告已经明确给出了同样的 No-go 判断：当前应重新平衡损失、隔离 persistent interior、先验证 growth/decay 两侧是否都可辨识，而不是继续 rollout 或联合训练。
+
+**最优先的一次训练实验，应当是：冻结 R4-b、只预测第 1 帧、只在 persistent interior 上训练三分类的增强/维持/减弱分支，并分别监督正负幅值。**这一步通过以后，源汇项才真正从“有物理名字的残差”变成“可验证的物理机制”。

@@ -138,3 +138,62 @@ def test_bounded_source_single_step_keeps_twenty_flow_head_outputs():
     assert result['prediction'].shape == (1, 1, 1, 8, 10)
     assert result['flow'].shape == (1, 1, 2, 8, 10)
     assert result['source_rain'].shape == result['prediction'].shape
+
+
+def _factorized_source_config():
+    config = _config()
+    config.evolution_field_space = 'rain_rate'
+    config.evolution_use_source = True
+    config.evolution_source_parameterization = 'factorized_regime'
+    config.evolution_source_max_rain = 35.0
+    return config
+
+
+def test_factorized_zero_initialization_preserves_r4b():
+    baseline_config = _config()
+    baseline_config.evolution_field_space = 'rain_rate'
+    baseline = EvolutionConvLSTM_Model(2, [4, 4], baseline_config)
+    model = EvolutionConvLSTM_Model(2, [4, 4], _factorized_source_config())
+    model.load_state_dict(baseline.state_dict(), strict=False)
+    history = torch.rand(2, 3, 1, 8, 10)
+    expected = baseline(history, return_aux=True)
+    result = model(history, return_aux=True)
+    torch.testing.assert_close(result['prediction'], expected['prediction'])
+    assert result['regime_probability'].shape == (2, 4, 3, 8, 10)
+    assert result['growth_fraction'].shape == (2, 4, 1, 8, 10)
+    assert result['decay_fraction'].shape == result['growth_fraction'].shape
+    torch.testing.assert_close(
+        result['source_rain'], torch.zeros_like(result['source_rain']),
+        atol=1e-5, rtol=0)
+
+
+def test_factorized_growth_and_decay_heads_receive_gradients():
+    model = EvolutionConvLSTM_Model(2, [4, 4], _factorized_source_config())
+    with torch.no_grad():
+        model.regime_head.bias.zero_()
+        model.growth_head.bias.zero_()
+        model.decay_head.bias.zero_()
+    history = torch.rand(1, 3, 1, 8, 10)
+    target = torch.rand(1, 4, 1, 8, 10)
+    result = model(history, return_aux=True, teacher_forcing=target)
+    result['evolved_rain'].sum().backward()
+    assert torch.count_nonzero(model.regime_head.weight.grad) > 0
+    assert torch.count_nonzero(model.growth_head.weight.grad) > 0
+    assert torch.count_nonzero(model.decay_head.weight.grad) > 0
+
+
+def test_factorized_teacher_forced_source_is_zero_outside_interior_mask():
+    model = EvolutionConvLSTM_Model(2, [4, 4], _factorized_source_config())
+    with torch.no_grad():
+        model.regime_head.bias.copy_(torch.tensor([20.0, 0.0, 0.0]))
+        model.growth_head.bias.zero_()
+    history = torch.zeros(1, 3, 1, 8, 10)
+    target = torch.zeros(1, 4, 1, 8, 10)
+    history[:, -1, :, 2:6, 2:6] = 0.8
+    target[:, :, :, 2:6, 2:6] = 0.8
+    result = model(history, return_aux=True, teacher_forcing=target)
+    expected_mask = torch.zeros_like(result['source_rain'][:, 0])
+    expected_mask[..., 3:5, 3:5] = 1.0
+    torch.testing.assert_close(
+        result['source_rain'][:, 0] * (1.0 - expected_mask),
+        torch.zeros_like(result['source_rain'][:, 0]))

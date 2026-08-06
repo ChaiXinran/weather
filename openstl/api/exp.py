@@ -103,6 +103,23 @@ class BaseExperiment(object):
                     alias_name='best_val_csi.ckpt',
                 ),
             ])
+            mechanism_monitor = getattr(
+                args, 'bth_mechanism_checkpoint_monitor', None)
+            if mechanism_monitor:
+                callbacks.append(BestCheckpointCallback(
+                    monitor=mechanism_monitor,
+                    filename=(
+                        'val-mechanism-{epoch:02d}-{'
+                        + mechanism_monitor + ':.6f}'),
+                    mode=getattr(
+                        args, 'bth_mechanism_checkpoint_mode', 'min'),
+                    save_last=False,
+                    dirpath=ckpt_dir,
+                    verbose=True,
+                    every_n_epochs=args.log_step,
+                    save_top_k=3,
+                    alias_name='best_val_mechanism.ckpt',
+                ))
         else:
             callbacks.append(BestCheckpointCallback(
                 monitor=args.metric_for_bestckpt,

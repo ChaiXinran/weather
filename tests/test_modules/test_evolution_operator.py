@@ -123,3 +123,50 @@ def test_bounded_source_has_gradients_on_both_signed_branches():
     source.sum().backward()
     assert torch.all(torch.isfinite(logits.grad))
     assert torch.all(logits.grad != 0)
+
+
+def test_factorized_regime_probabilities_sum_to_one():
+    operator = EvolutionOperator(field_space='rain_rate')
+    initial = rain_to_normalized_dbz(torch.full((2, 1, 4, 5), 10.0))
+    flow = torch.zeros(2, 2, 4, 5)
+    logits = torch.randn(2, 3, 4, 5)
+    result = operator.evolve_factorized_step(
+        initial, flow, logits, torch.zeros_like(initial),
+        torch.zeros_like(initial), torch.full_like(initial, 5.0))
+    torch.testing.assert_close(
+        result['regime_probability'].sum(dim=1),
+        torch.ones(2, 4, 5))
+
+
+def test_factorized_growth_and_decay_states_are_physically_bounded():
+    operator = EvolutionOperator(field_space='rain_rate')
+    initial_rain = torch.full((1, 1, 3, 4), 10.0)
+    initial = rain_to_normalized_dbz(initial_rain)
+    flow = torch.zeros(1, 2, 3, 4)
+    regime_logits = torch.zeros(1, 3, 3, 4)
+    result = operator.evolve_factorized_step(
+        initial, flow, regime_logits,
+        torch.full_like(initial, 20.0),
+        torch.full_like(initial, 20.0),
+        torch.full_like(initial, 7.0))
+    assert torch.all(result['growth_state'] >= result['advected_rain'])
+    assert torch.all(result['decay_state'] <= result['advected_rain'])
+    assert torch.all(result['decay_state'] >= 0.0)
+    assert torch.all(result['evolved_rain'] <= operator.max_rain + 1e-5)
+
+
+def test_factorized_source_is_zero_outside_source_mask():
+    operator = EvolutionOperator(field_space='rain_rate')
+    initial = rain_to_normalized_dbz(torch.full((1, 1, 2, 3), 10.0))
+    flow = torch.zeros(1, 2, 2, 3)
+    regime_logits = torch.zeros(1, 3, 2, 3)
+    regime_logits[:, 0] = 20.0
+    mask = torch.tensor([[[[1.0, 0.0, 1.0], [0.0, 0.0, 1.0]]]])
+    result = operator.evolve_factorized_step(
+        initial, flow, regime_logits,
+        torch.full_like(initial, 20.0),
+        torch.zeros_like(initial), torch.full_like(initial, 5.0),
+        source_mask=mask)
+    torch.testing.assert_close(
+        result['net_source'] * (1.0 - mask),
+        torch.zeros_like(result['net_source']))
