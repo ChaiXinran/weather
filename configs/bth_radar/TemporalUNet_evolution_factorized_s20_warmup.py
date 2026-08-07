@@ -8,6 +8,8 @@ from configs.bth_radar.TemporalUNet_evolution_factorized_s20 import *
 evolution_validation_free_rollout = True
 evolution_free_rollout_training = True
 evolution_rollout_horizon = 3
+evolution_rollout_horizon_schedule = [3, 3, 6, 6, 10, 10, 20, 20, 20, 20]
 evolution_rollout_state_loss_weight = 0.25
+evolution_gradient_loss_weight = 0.1
 evolution_source_lr = 5e-5
 epoch = 10

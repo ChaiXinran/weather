@@ -290,6 +290,20 @@ class EvolutionPhysicsBase(Base_method):
                                               / (target_area + eps))))
         return torch.stack(losses).mean()
 
+    def _rain_gradient_loss(self, pred_rain, target_rain):
+        """Preserve strong-rain edges without letting clear background dominate."""
+        pred_dx = pred_rain[..., :, 1:] - pred_rain[..., :, :-1]
+        pred_dy = pred_rain[..., 1:, :] - pred_rain[..., :-1, :]
+        true_dx = target_rain[..., :, 1:] - target_rain[..., :, :-1]
+        true_dy = target_rain[..., 1:, :] - target_rain[..., :-1, :]
+        neighborhood = torch.maximum(pred_rain.detach(), target_rain)
+        mask_x = torch.maximum(neighborhood[..., :, 1:], neighborhood[..., :, :-1]) >= 8.0
+        mask_y = torch.maximum(neighborhood[..., 1:, :], neighborhood[..., :-1, :]) >= 8.0
+        error_x = (pred_dx - true_dx).abs()
+        error_y = (pred_dy - true_dy).abs()
+        return 0.5 * self._masked_mean(error_x, mask_x) + \
+            0.5 * self._masked_mean(error_y, mask_y)
+
     def _source_guard_loss(self, evolved_rain, advected_rain, target_rain,
                            mask):
         motion_error = (advected_rain.detach() - target_rain).abs()
@@ -483,8 +497,14 @@ class EvolutionPhysicsBase(Base_method):
 
     def _free_rollout_source_terms(self, result, batch_y,
                                    mechanism_result=None):
-        horizon = int(self.hparams.get(
-            'evolution_rollout_horizon') or result['prediction'].shape[1])
+        schedule = self.hparams.get('evolution_rollout_horizon_schedule', None)
+        if schedule:
+            schedule = [int(value) for value in schedule]
+            index = min(self.current_epoch, len(schedule) - 1)
+            horizon = schedule[index]
+        else:
+            horizon = int(self.hparams.get(
+                'evolution_rollout_horizon') or result['prediction'].shape[1])
         horizon = max(1, min(horizon, result['prediction'].shape[1]))
         target = batch_y[:, :horizon]
         pred_rain = result['evolved_rain'][:, :horizon]
@@ -503,6 +523,7 @@ class EvolutionPhysicsBase(Base_method):
         soft_csi_16 = self._soft_csi_loss(pred_rain, target_rain, 16.0)
         soft_csi_32 = self._soft_csi_loss(pred_rain, target_rain, 32.0)
         area_loss = self._area_bias_loss(pred_rain, target_rain)
+        gradient_loss = self._rain_gradient_loss(pred_rain, target_rain)
         budget_mechanism = None
         if mechanism_result is not None:
             budget_mechanism = {
@@ -529,6 +550,7 @@ class EvolutionPhysicsBase(Base_method):
             'soft_csi_16': soft_csi_16,
             'soft_csi_32': soft_csi_32,
             'area_loss': area_loss,
+            'gradient_loss': gradient_loss,
             'budget_loss': budget_loss,
             'source_abs_mean_mm_h': source_abs,
             'source_harm_fraction': harm_fraction,
@@ -632,6 +654,38 @@ class EvolutionPhysicsBase(Base_method):
         values = self._teacher_forced_effective_source_terms(
             mechanism_result, batch_y)
 
+        # When motion is trainable, keep its objective explicit. Source
+        # supervision alone can otherwise make motion manufacture an easier
+        # residual instead of transporting the observed rain field.
+        if not bool(self.hparams.get('evolution_source_only', False)):
+            operator = self.model.operator
+            previous = torch.cat((batch_x[:, -1:], batch_y[:, :-1]), dim=1)
+            transported = torch.stack([
+                operator.warp(previous[:, step],
+                              mechanism_result['flow'][:, step])
+                for step in range(batch_y.shape[1])
+            ], dim=1)
+            transported_rain = normalized_dbz_to_rain(
+                transported, value_scale=operator.value_scale,
+                zr_a=operator.zr_a, zr_b=operator.zr_b)
+            target_rain = normalized_dbz_to_rain(
+                batch_y, value_scale=operator.value_scale,
+                zr_a=operator.zr_a, zr_b=operator.zr_b)
+            motion_error = self._rain_state_error(
+                transported_rain, target_rain)
+            event_rain = torch.maximum(
+                transported_rain.detach(), target_rain)
+            weights = (event_rain >= 0.1).to(motion_error.dtype)
+            weights = weights + 2.0 * (event_rain >= 16.0).to(
+                motion_error.dtype)
+            weights = weights + 5.0 * (event_rain >= 32.0).to(
+                motion_error.dtype)
+            motion_loss = (motion_error * weights).sum() / weights.sum().clamp_min(1.0)
+            motion_loss = float(self.hparams.get(
+                'evolution_motion_loss_weight', 1.0)) * motion_loss
+            values['motion_loss'] = motion_loss
+            values['loss'] = values['loss'] + motion_loss
+
         free_rollout = bool(self.hparams.get(
             'evolution_free_rollout_training', False))
         if free_rollout and self.model.forecast_steps > 1:
@@ -653,6 +707,9 @@ class EvolutionPhysicsBase(Base_method):
                 + float(self.hparams.get(
                     'evolution_area_loss_weight', 0.02))
                 * rollout_terms['area_loss']
+                + float(self.hparams.get(
+                    'evolution_gradient_loss_weight', 0.1))
+                * rollout_terms['gradient_loss']
                 + float(self.hparams.get(
                     'evolution_budget_loss_weight', 0.05))
                 * rollout_terms['budget_loss'])

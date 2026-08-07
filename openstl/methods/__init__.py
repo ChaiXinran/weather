@@ -1,6 +1,7 @@
 # Copyright (c) CAIRI AI Lab. All rights reserved
 
 from .convlstm import ConvLSTM
+from .direct_physics_hybrid import DirectPhysicsHybrid
 from .evolution_convlstm import EvolutionConvLSTM
 from .evolution_temporal_unet import EvolutionTemporalUNet
 from .e3dlstm import E3DLSTM
@@ -18,6 +19,8 @@ from .wast import WaST
 
 method_maps = {
     'convlstm': ConvLSTM,
+    'directphysicshybrid': DirectPhysicsHybrid,
+    'direct_physics_hybrid': DirectPhysicsHybrid,
     'evolutionconvlstm': EvolutionConvLSTM,
     'evolution_convlstm': EvolutionConvLSTM,
     'evolutiontemporalunet': EvolutionTemporalUNet,
@@ -39,7 +42,7 @@ method_maps = {
 }
 
 __all__ = [
-    'method_maps', 'ConvLSTM', 'EvolutionConvLSTM', 'EvolutionTemporalUNet',
+    'method_maps', 'ConvLSTM', 'DirectPhysicsHybrid', 'EvolutionConvLSTM', 'EvolutionTemporalUNet',
     'E3DLSTM', 'MAU', 'MIM',
     'PredRNN', 'PredRNNpp', 'PredRNNv2', 'PhyDNet', 'SimVP', 'TAU',
     "MMVP", 'SwinLSTM_D', 'SwinLSTM_B', 'WaST'

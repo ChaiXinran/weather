@@ -1,1124 +1,556 @@
-有，而且结合最新代码看，**当前 source 训练确实存在结构性的损失错配**。但要先区分两个问题：
+你说得对。**“优化目标可以和业务指标不同”只是数学层面的事实，不能成为当前现象的合理解释。**
 
-1. 新的 Temporal U-Net motion-only 本身没有通过 Gate，最佳综合 CSI 只有 0.4399，弱于 ConvLSTM 对照 0.6225，报告本身已经给出“不要直接进入 source 阶段”的结论。
-2. 在这个较弱的 motion checkpoint 上加入 source 后，CSI 又从初始较高值骤降，说明 **source loss 还在进一步破坏已有运动解**。
+CSI 的硬阈值统计不可直接反向传播，所以训练时必须用可微代理损失；但代理损失的职责就是让验证 CSI 同方向改善。现在出现：
 
-因此重新设计损失函数的合理目标不是马上让 Temporal U-Net 超过 ConvLSTM，而是先保证：
+$$
+\text{训练/验证损失下降或持平}
+\qquad
+\text{CSI持续下降}
+$$
 
-[
-\boxed{\text{训练后的 source 至少不劣于 zero-source}}
-]
+对于你们明确以 **CSI@16、CSI@32 和强降水结构保持**为核心的任务，这就说明：
 
-然后再考虑 source 是否能够产生正增益。
+> **当前可微优化目标没有正确代理业务目标，现有训练方向确实有问题。**
 
-# 一、最新代码中最关键的损失问题
-
-## 1. 物理标签和 free rollout 使用了同一条混合轨迹
-
-当前 `_factorized_source_training_step()` 只执行一次模型前向：
-
-```python
-result = self.model(
-    batch_x,
-    return_aux=True,
-    teacher_forcing=batch_y if use_teacher_forcing else None,
-    teacher_forcing_ratio=teacher_forcing_ratio,
-)
-```
-
-随后：
-
-* `regime_loss`
-* `magnitude_loss`
-* `state_loss`
-* `rollout_loss`
-
-全部基于同一个 `result`。
-
-这会产生一个根本问题。
-
-在 teacher forcing 下：
-
-[
-A_t=\mathcal W(Y_{t-1},v_t)
-]
-
-[
-S_t^*=Y_t-A_t
-]
-
-还可以近似理解为“给定运动后的物理源汇”。
-
-但在 scheduled/free rollout 下：
-
-[
-A_t=\mathcal W(\hat Y_{t-1},v_t)
-]
-
-此时：
-
-[
-S_t^*=Y_t-A_t
-]
-
-混合了：
-
-* 真实增强与减弱；
-* 前几步 source 误差；
-* 前几步运动误差；
-* 插值误差；
-* 位置偏差；
-* 强度累积误差。
-
-它已经不再是干净的物理 source 标签。
-
-于是当前训练实际上要求 source-head：
-
-> 一边学习真实增长/衰减，一边负责补偿自身递归产生的全部误差。
-
-这很容易形成正反馈。
+而且你们的重点正是解决 MSE、L1 导致的平滑和强回波衰减，所以不能期待“多训练几十轮以后自己恢复”。当前配置不建议继续跑 50 轮。
 
 ---
 
-## 2. 当前监督的不是实际进入方程的 source
+# 一、仓库代码中确实存在明显的目标错配
 
-当前 operator 中实际生效的 correction 是：
+我扫描了 `ChaiXinran/weather` 当前配置和训练代码。
 
-[
-\hat S
-======
+## 1. 名义上预测20步，训练却只约束3步自由 rollout
 
-## p_g\alpha_g C^+
-
-p_d\alpha_d A
-]
-
-其中：
-
-* (p_g,p_d)：growth/decay 概率；
-* (\alpha_g,\alpha_d)：growth/decay fraction；
-* (C^+)：正 source capacity；
-* (A)：advected rain。
-
-但是当前损失分别监督：
-
-[
-L_{\mathrm{regime}}(p_g,p_s,p_d)
-]
-
-和：
-
-[
-L_{\mathrm{magnitude}}(\alpha_g,\alpha_d)
-]
-
-而 magnitude 只在真实 growth 或 decay 区域计算：
+全开放配置继承了 `factorized_s20_warmup`：
 
 ```python
-growth_mask = labels == 0
-decay_mask = labels == 2
+evolution_free_rollout_training = True
+evolution_rollout_horizon = 3
+evolution_rollout_state_loss_weight = 0.25
 ```
 
-steady 像素不直接约束 `growth_fraction` 和 `decay_fraction`。
+也就是说，模型验证和部署时递推 20 步，但真正的 free-rollout 损失只看前 3 步。
 
-这意味着：
+训练目标主要回答的是：
 
-* 单独的类别可能预测得还可以；
-* 单独的幅度可能也接近标签；
-* 但二者乘积形成的实际 source 仍可能错误；
-* steady 区域的小概率 growth/decay 会在20步中不断累积。
+> 前18分钟是否合理？
 
-真正应该监督的是：
+业务指标回答的是：
 
-[
-\hat G=p_g\alpha_gC^+
-]
+> 未来两小时、尤其第二小时强降水是否存活？
 
-[
-\hat D=p_d\alpha_dA
-]
-
-而不是只监督 (p) 和 (\alpha) 各自。
+这两者天然不一致。
 
 ---
 
-## 3. state loss看不到许多实际产生的有害source
+## 2. 绝大多数训练信号是 teacher-forced
 
-当前代码先执行：
-
-```python
-masked_source = result['net_source'] * interior
-masked_evolved_rain = advected_rain + masked_source
-```
-
-然后用 `masked_evolved_rain` 计算 state loss。
-
-也就是说：
-
-> state loss只评估 persistent interior 中的source。
-
-但在 mixed/free rollout 中，模型实际使用的 source mask 是：
+`_factorized_source_training_step()` 首先运行：
 
 ```python
-Erode(advected_rain >= threshold)
+teacher_forcing=batch_y
+teacher_forcing_ratio=1.0
 ```
 
-它允许 source 作用于所有平流后仍有降水的内部区域，包括未来即将消散的区域。
+然后计算 factorized source 的主要机制损失；只有附加的 rollout 分支使用真正的自由递推，而且只递推3步。
 
-因此会出现：
+模型内部 teacher forcing 的实现是：
 
-```text
-实际 rollout：
-source 在 death 区域发生了作用
-
-state loss：
-把 death 区域 source 乘成了0，因此没有直接惩罚
+```python
+if teacher_forcing is not None and step > 0:
+    current = teacher_forcing[:, step - 1]
 ```
 
-这些有害 correction 只能由全场 MSE 间接发现，但全场 MSE 又容易被大量弱雨与背景主导。
+因此每一步都从真实上一帧重新开始，而不是从模型自己的上一帧开始。
+
+当前训练实际上更接近：
+
+$$
+R_{t-1}^{true}
+\rightarrow
+\hat R_t
+$$
+
+而部署是：
+
+$$
+\hat R_{t-1}
+\rightarrow
+\hat R_t
+$$
+
+所以模型可以把“真实上一帧条件下的单步残差”学得很好，却没有被充分要求处理自身预测误差、插值衰减和强降水递归消失。
 
 ---
 
-## 4. death区域没有被直接监督
+## 3. CSI损失权重明显太弱
 
-当前 regime 标签只在：
+当前配置中：
 
-[
-\operatorname{Erode}
-[(A\geq0.1)\cap(Y\geq0.1)]
-]
+```python
+evolution_effective_loss_weight = 1.0
+evolution_state_loss_weight = 1.0
+evolution_steady_loss_weight = 0.25
+evolution_guard_loss_weight = 0.5
 
-即 persistent interior 内定义。
+evolution_rollout_state_loss_weight = 0.25
+evolution_soft_csi_16_loss_weight = 0.05
+evolution_soft_csi_32_loss_weight = 0.10
+evolution_area_loss_weight = 0.02
+evolution_budget_loss_weight = 0.05
+```
+
+CSI@16 和 CSI@32 的代理损失不仅权重低，而且只作用于3步 rollout。
+
+于是训练梯度主要来自：
+
+* source magnitude；
+* state Huber；
+* growth/steady/decay 分类；
+* teacher-forced 单步状态误差。
+
+而真正的业务目标：
+
+* 20步 CSI16；
+* 20步 CSI32；
+* 第二小时强降水存活；
+* 强核心和边缘保持；
+
+在总梯度中占比很小。
+
+---
+
+## 4. 当前状态损失仍然会鼓励条件均值和平滑
+
+当前 `_rain_state_error()` 是线性雨强 Huber 与 `log1p` 雨强 Huber 的平均：
+
+$$
+L_{\mathrm{state}}
+==================
+
+\frac12L_{\mathrm{Huber}}
+\left(
+\frac{\hat R}{R_{\max}},
+\frac{R}{R_{\max}}
+\right)
++
+\frac12L_{\mathrm{Huber}}
+\left(
+\frac{\log(1+\hat R)}{\log(1+R_{\max})},
+\frac{\log(1+R)}{\log(1+R_{\max})}
+\right)
+$$
+
+这比普通 MSE 好，但仍然是逐像素回归目标。
+
+在位置不确定时，逐像素回归最容易采取的策略仍是：
+
+* 降低峰值；
+* 扩散边缘；
+* 预测多个可能位置的平均；
+* 把 35 mm/h 压到 25–30 mm/h。
+
+这样 Huber 可能下降，但 CSI32 会直接变成漏报。
+
+---
+
+## 5. 强降水像素加权也偏弱
+
+目前强雨权重设置为：
+
+```python
+evolution_pixel_16_increment = 1.0
+evolution_pixel_32_increment = 1.0
+evolution_pixel_max_weight = 3.0
+```
+
+即使达到 32 mm/h，像素权重最多也只有普通活跃像素的约3倍。
+
+但在数据中，32 mm/h 像素远少于弱雨和背景像素。三倍权重通常不足以抵消样本数量差异。
+
+---
+
+## 6. `val_loss` 本身就是 MSE
+
+配置最后仍然是：
+
+```python
+loss_type = 'mse'
+```
+
+而 factorized 模型验证阶段明确使用：
+
+```python
+loss = self.validation_criterion(result['prediction'], target)
+```
+
+所以日志里的 `val_loss` 本质上仍然主要是 MSE，而不是 CSI 导向损失。
 
 因此：
 
-[
-A\geq0.1,\quad Y<0.1
-]
-
-这种真正的消散区域被排除在 growth/steady/decay 标签之外。
-
-但推理时，只要 advected rain 仍存在，source-head就会在这里工作。
-
-这会导致明显的训练—推理不一致：
-
-* 训练时模型不知道怎样完全消散一个对象；
-* 推理时它却必须对这些区域作出 source 决策。
-
----
-
-## 5. inverse-frequency regime loss过度提高少数类的重要性
-
-当前 `_balanced_regime_loss()` 使用：
-
-[
-w_c=\frac{N}{3N_c}
-]
-
-进行完全反频率加权。
-
-如果真实标签中 steady 占绝大多数，完整平衡会人为让：
-
 ```text
-growth
-steady
-decay
+val_loss 下降
+CSI 下降
 ```
 
-三类对梯度的贡献近似相等。
-
-这对普通分类可能有助于少数类 recall，但对 source 递归很危险：
-
-* 错误预测 steady：不修正；
-* 错误预测 growth：持续加雨；
-* 错误预测 decay：持续减雨；
-* 后两类错误会进入下一步继续放大。
-
-因此分类错误的物理代价并不对称，不能简单追求三类完全平衡。
+不是神秘现象，而是当前验证目标本来就允许模型通过平滑降低误差。
 
 ---
 
-## 6. source初始化过度饱和
+# 二、当前 full-open 并不是真正的“20步业务目标联合训练”
 
-当前 source head 初始化为：
+虽然参数全部开放了，但从优化目标看，它实际上是：
 
-```python
-regime bias = [0, 20, 0]
-growth bias = -20
-decay bias = -20
-```
+> **全参数参与的 teacher-forced source 机制训练
+> ＋低权重、短3步的 free-rollout 正则化。**
 
-这能保证初始输出接近 zero-source，但存在严重梯度问题：
+并不是：
 
-[
-\sigma(-20)\approx2\times10^{-9}
-]
+> **以20步 CSI16/32 和强降水结构保持为中心的联合训练。**
 
-growth/decay fraction几乎饱和在0，梯度也极小。
+所以这次失败不应该归结为：
 
-与此同时，regime CE在growth/decay标签上的梯度并不小，因此训练初期容易出现：
+* 参数量太小；
+* scratch 随机性太强；
+* 训练轮数不够。
 
-```text
-regime概率先快速改变
-magnitude分支仍处于饱和状态
-```
+更核心的问题是：
 
-三条分支学习速度严重不同。
+$$
+\boxed{
+\text{训练时效、训练状态分布、损失权重}
+\neq
+\text{实际业务目标}
+}
+$$
 
-这会让模型先学会“在哪里改变”，但还没有稳定学会“改多少”。
+降低学习率只能减慢错误方向，不能改变目标方向。
 
 ---
 
-## 7. rollout loss就是归一化dBZ MSE
+# 三、应该怎样重新设计优化目标
 
-当前：
+不建议再单纯增加一个损失模块，而应把目标明确分成三个职责。
 
-```python
-rollout_loss = self.validation_criterion(
-    result['prediction'], target
-)
-```
+## 1. 运动项：确保平流本身正确
 
-而 `validation_criterion` 固定为 `nn.MSELoss()`。
+运动分支需要单独的 teacher-forced transport loss：
 
-模型输出又是归一化dBZ，因此它优化的是：
+$$
+L_{\mathrm{motion}}
+===================
 
-[
-\operatorname{MSE}(\widehat{\mathrm{dBZ}},\mathrm{dBZ})
-]
+\sum_t
+w(R_t)
+,
+\rho
+\left(
+\operatorname{Warp}(R_{t-1}^{true},v_t)-R_t
+\right)
++
+\lambda_{\mathrm{smooth}}L_{\mathrm{flow\ smooth}}
+$$
 
-而最终关心的是：
+其中强降水权重可以改为：
 
-* rain-rate；
-* CSI@16/32；
-* 强降水面积；
-* 强度保持；
-* long-lead free rollout。
+$$
+w(R)=
+1
++2\mathbf1(R\ge16)
++5\mathbf1(R\ge32)
+$$
 
-所以：
+上限可以从当前3提高到6–8，但需要监控梯度。
 
-[
-L_{\mathrm{MSE}}\downarrow
-]
+这个损失专门回答：
 
-并不保证：
+> 不考虑 source，运动能否把上一帧搬到正确位置？
 
-[
-CSI_{16/32}\uparrow
-]
+---
 
-当前配置也明确将 `loss_type='mse'`，而 source loss 权重为1/1/0.2/1。
+## 2. Source项：只学习运动无法解释的生消残差
 
-# 二、建议把训练拆成两条独立分支
-
-不要再用一条 scheduled trajectory 同时生成物理标签和rollout损失。
-
-## 分支A：teacher-forced机制监督
-
-始终使用真实上一帧：
-
-[
-Y_{t-1}^{true}
-]
-
-计算：
-
-[
-A_t^{TF}=\mathcal W(Y_{t-1}^{true},v_t)
-]
-
-[
-S_t^*=Y_t-A_t^{TF}
-]
-
-这一分支只负责学习：
+保留现有 factorized source 机制：
 
 * growth；
 * steady；
 * decay；
-* source幅度；
-* 单步状态修正。
+* effective source；
+* guard；
+* source budget。
 
-这里的标签才具有相对清楚的物理含义。
+这部分机制设计本身是合理的。
 
-## 分支B：pure-free rollout监督
+但 source 的 oracle 应继续基于：
 
-始终使用模型上一帧：
+$$
+s_t^{oracle}
+============
 
-[
-\hat Y_{t-1}
-]
+R_t-
+\operatorname{Warp}(R_{t-1}^{true},v_t)
+$$
 
-得到：
-
-[
-\hat Y_t
-]
-
-这一分支不再构造所谓的“oracle physical source”，只计算：
-
-* free-rollout rain-rate state loss；
-* soft CSI；
-* intensity/bias约束；
-* source累积约束。
-
-也就是：
-
-```python
-mechanism_result = self.model(
-    batch_x,
-    return_aux=True,
-    teacher_forcing=batch_y,
-    teacher_forcing_ratio=1.0,
-)
-
-free_result = self.model(
-    batch_x,
-    return_aux=True,
-    teacher_forcing=None,
-    teacher_forcing_ratio=0.0,
-)
-```
-
-不要使用75%/25%的混合轨迹来构造机制标签。
-
-# 三、重新设计核心source损失
-
-定义teacher-forced平流场：
-
-[
-A=A_t^{TF}
-]
-
-真实目标：
-
-[
-Y=Y_t
-]
-
-oracle source：
-
-[
-S^*=Y-A
-]
-
-预测的实际增长和衰减贡献：
-
-[
-\hat G=p_g\alpha_gC^+
-]
-
-[
-\hat D=p_d\alpha_dA
-]
-
-预测net source：
-
-[
-\hat S=\hat G-\hat D
-]
-
-目标贡献：
-
-[
-G^*=\operatorname{clip}(\max(S^*,0),0,C^+)
-]
-
-[
-D^*=\operatorname{clip}(\max(-S^*,0),0,A)
-]
-
-## 1. Effective source loss
-
-直接监督真正进入物理方程的贡献：
-
-[
-L_{\mathrm{eff}}
-================
-
-\operatorname{Huber}
-\left(
-\frac{\hat G}{C^++\epsilon},
-\frac{G^*}{C^++\epsilon}
-\right)
-+
-\operatorname{Huber}
-\left(
-\frac{\hat D}{A+\epsilon},
-\frac{D^*}{A+\epsilon}
-\right)
-]
-
-对应代码：
-
-```python
-pred_growth = (
-    result["regime_probability"][:, :, 0:1]
-    * result["growth_fraction"]
-    * result["positive_capacity"]
-)
-
-pred_decay = (
-    result["regime_probability"][:, :, 2:3]
-    * result["decay_fraction"]
-    * result["advected_rain"]
-)
-
-target_growth = oracle_source.clamp_min(0.0)
-target_growth = torch.minimum(
-    target_growth,
-    result["positive_capacity"].detach(),
-)
-
-target_decay = (-oracle_source).clamp_min(0.0)
-target_decay = torch.minimum(
-    target_decay,
-    result["advected_rain"].detach(),
-)
-```
-
-这一项应该取代当前主要的 `magnitude_loss`。
+并对运动背景停止梯度，避免 source loss 反过来要求 motion 通过错误移动制造一个更容易拟合的残差。
 
 ---
 
-## 2. Rain-state loss
+## 3. 真正的20步自由 rollout 目标
 
-直接使用模型真实输出：
+核心必须变成：
 
-```python
-result["evolved_rain"]
-```
+$$
+L_{\mathrm{rollout}}
+====================
 
-而不是重新构造：
-
-```python
-advected + net_source * interior
-```
-
-推荐同时使用线性雨强和log雨强：
-
-[
-L_{\mathrm{state}}
-==================
-
-0.5,\operatorname{Huber}
-\left(
-\frac{\hat R}{R_{\max}},
-\frac{Y}{R_{\max}}
-\right)
-+
-0.5,\operatorname{Huber}
-\left(
-\frac{\log(1+\hat R)}{\log(1+R_{\max})},
-\frac{\log(1+Y)}{\log(1+R_{\max})}
-\right)
-]
-
-线性项保护强降水，log项避免弱中雨完全失去作用。
-
----
-
-## 3. Steady/abstention loss
-
-对于：
-
-[
-|S^*|\leq\delta
-]
-
-要求source尽量不修改motion结果：
-
-[
-L_{\mathrm{steady}}
-===================
-
-\frac{|\hat G|+|\hat D|}
-{A+C^++\epsilon}
-]
-
-或者：
-
-[
-L_{\mathrm{steady}}=|\hat S|
-]
-
-这是非常重要的保守约束：
-
-> 没有明确增长或衰减证据时，优先相信motion-only。
-
----
-
-## 4. Do-no-harm loss
-
-明确约束source不能比平流结果更差：
-
-[
-e_{\mathrm{motion}}=|A-Y|
-]
-
-[
-e_{\mathrm{source}}=|\hat R-Y|
-]
-
-[
-L_{\mathrm{guard}}
-==================
-
-\max
-\left(
-e_{\mathrm{source}}-e_{\mathrm{motion}},
-0
-\right)
-]
-
-这相当于把zero-source结果设为局部安全基线。
-
-当前现象就是source一更新便离开稳定motion解，因此这项非常适合你们。
-
----
-
-## 5. Regime loss只保留为辅助项
-
-不建议彻底删除三分类，因为它仍然提供解释性。
-
-但应改成：
-
-[
-\lambda_{\mathrm{regime}}=0.05\sim0.1
-]
-
-并取消完全反频率平衡。
-
-可使用：
-
-[
-w_c=
-\min
+\sum_{t=1}^{20}
+\gamma_t
 \left[
-\left(\frac{N}{N_c}\right)^{1/2},
-2
+\lambda_I L_{\mathrm{intensity},t}
++
+\lambda_{16}L_{\mathrm{CSI16},t}
++
+\lambda_{32}L_{\mathrm{CSI32},t}
++
+\lambda_G L_{\mathrm{gradient},t}
++
+\lambda_A L_{\mathrm{area},t}
 \right]
-]
+$$
 
-即：
+其中后期权重应不低于前期，例如：
 
-* 使用平方根平衡；
-* 最大权重不超过2；
-* 不让growth/decay梯度无限放大。
+$$
+\gamma_t
+========
 
-# 四、重新定义训练mask
+1+\frac{t-1}{19}
+$$
 
-建议source训练作用域与推理一致：
+第20步约为第1步的两倍，防止模型只优化前几帧。
 
-[
-M_{\mathrm{action}}
-===================
+---
 
-\operatorname{Erode}(A\geq0.1,1)
-]
+# 四、预防平滑最关键的四项损失
 
-然后再划分：
+不需要堆十几个模块，先保留四个核心目标。
 
-### Persistent interior
+## 1. 强雨加权的稳健雨强损失
 
-[
-A\geq0.1,\quad Y\geq0.1
-]
+不要用普通 MSE，使用加权 Charbonnier、Huber 或 log-Huber：
 
-用于growth/steady/decay。
-
-### Death
-
-[
-A\geq0.1,\quad Y<0.1
-]
-
-应作为强decay目标：
-
-[
-D^*\approx A
-]
-
-### Edge
-
-边缘仍可暂时排除，因为残差可能主要来自运动误差。
-
-### Birth
-
-[
-A<0.1,\quad Y\geq0.1
-]
-
-当前source mask本来不允许在无雨区域生成新生，因此第一阶段仍然不训练birth。
-
-所以可靠监督mask可以是：
-
-[
-M_{\mathrm{train}}
-==================
-
-M_{\mathrm{persistent\ interior}}
-\cup
-M_{\mathrm{death}}
-]
-
-而不是只用persistent interior。
-
-# 五、free-rollout损失
-
-先不要直接20步。
-
-采用：
-
-```text
-1 step
-→ 3 step pure-free
-→ 5 step pure-free
-→ 10 step
-→ 20 step
-```
-
-而不是：
-
-```text
-20步 + scheduled sampling比例逐渐下降
-```
-
-## 1. Free rain-state loss
-
-[
-L_{\mathrm{roll,state}}
-=======================
-
-\sum_{t=1}^{K}
-w_t L_{\mathrm{state}}(\hat R_t,Y_t)
-]
-
-例如3步：
-
-[
-w=[1.0,1.25,1.5]
-]
-
-稍微提高后续时效权重。
-
-## 2. Soft CSI loss
-
-对16和32 mm/h：
-
-[
-P_\tau
-======
-
-\sigma
-\left(
-\frac{\hat R-\tau}{T}
-\right)
-]
-
-[
-L_{\mathrm{CSI},\tau}
-=====================
-
-1-
-\frac{
-\sum P_\tau Y_\tau+\epsilon
-}{
-\sum P_\tau+\sum Y_\tau-\sum P_\tau Y_\tau+\epsilon
-}
-]
-
-建议：
-
-[
-\lambda_{16}=0.05
-]
-
-[
-\lambda_{32}=0.10
-]
-
-不要让soft CSI成为主损失，只作为高阈值方向校正。
-
-## 3. Area/bias loss
-
-防止靠扩大或压缩雨区获得虚假改善：
-
-[
-L_{\mathrm{area},\tau}
+$$
+L_{\mathrm{intensity}}
 ======================
 
+\frac{
+\sum w(R)
+,
+\rho\bigl(\log(1+\hat R)-\log(1+R)\bigr)
+}{
+\sum w(R)
+}
+$$
+
+它保证数值基本正确，但不让背景主导。
+
+---
+
+## 2. 直接的 Soft CSI16 和 Soft CSI32
+
+当前代码已经有 soft CSI：
+
+$$
+\operatorname{SoftCSI}_\tau
+===========================
+
+\frac{
+\sum p_\tau y_\tau
+}{
+\sum p_\tau+\sum y_\tau-\sum p_\tau y_\tau
+}
+$$
+
+问题不是没有，而是：
+
+* 权重过小；
+* 只作用3步；
+* 温度固定；
+* 被其他损失淹没。
+
+第一版可以将权重提高到类似：
+
+```python
+soft_csi_16_weight = 0.3
+soft_csi_32_weight = 0.6
+```
+
+但更重要的是记录每个**加权后损失值和梯度范数**，确保 CSI 项至少贡献总梯度的约 30%–50%，而不是只看配置数字。
+
+温度可以退火：
+
+$$
+T:2.0\rightarrow0.75
+$$
+
+早期梯度平滑，后期逐渐接近硬阈值。
+
+---
+
+## 3. 梯度/边缘保持损失
+
+用于直接惩罚边缘变钝：
+
+$$
+L_{\mathrm{grad}}
+=================
+
+\left|
+\nabla\hat R-\nabla R
+\right|_1
+$$
+
+最好只在降水邻域和强降水附近计算，避免背景噪声。
+
+这比单纯加大 MSE 更直接地解决：
+
+* 雨带边缘模糊；
+* 强核心扩散；
+* 对流结构被抹平。
+
+---
+
+## 4. 面积和强度保持
+
+仅优化 CSI 可能通过扩大预测面积提高 POD，因此仍需要面积约束：
+
+$$
+L_{\mathrm{area}}
+=================
+
+\sum_{\tau\in{16,32}}
 \left|
 \log
 \frac{
-\sum P_\tau+\epsilon
+A_\tau(\hat R)+\epsilon
 }{
-\sum Y_\tau+\epsilon
+A_\tau(R)+\epsilon
 }
 \right|
-]
+$$
 
-分别用于16和32 mm/h。
+再增加一个强雨峰值或分位数保持项：
 
-## 4. Source budget loss
+$$
+L_{\mathrm{peak}}
+=================
 
-当前每一步最大capacity为4/6/8/10 mm/h，连续20步仍可能产生较大累计修正。
+\left|
+Q_{0.95}(\hat R)-Q_{0.95}(R)
+\right|
+$$
 
-可以约束累计净source：
+这可以直接防止强雨峰值被压低。
 
-[
-B_t=\sum_{\tau=1}^{t}\sum_{x,y}\hat S_\tau(x,y)
-]
+---
 
-与teacher-forced oracle累计source保持同量级：
+# 五、建议的最小可行总损失
 
-[
-L_{\mathrm{budget}}
-===================
+第一版不要过于复杂，可以使用：
 
-\frac{
-|B_t-B_t^*|
-}{
-\sum Y_t+\epsilon
-}
-]
-
-先以较小权重：
-
-[
-\lambda_{\mathrm{budget}}=0.05
-]
-
-使用。
-
-# 六、推荐的总损失
-
-## 阶段S1：单步机制识别
-
-[
+$$
 \boxed{
-L_{S1}
-======
-
-1.0L_{\mathrm{eff}}
+L=
+L_{\mathrm{motion}}
 +
-1.0L_{\mathrm{state}}
+L_{\mathrm{source}}
 +
-0.25L_{\mathrm{steady}}
+0.5L_{\mathrm{rollout\ intensity}}
 +
-0.5L_{\mathrm{guard}}
+0.3L_{\mathrm{CSI16}}
 +
-0.05L_{\mathrm{regime}}
+0.6L_{\mathrm{CSI32}}
++
+0.1L_{\mathrm{grad}}
++
+0.05L_{\mathrm{area}}
 }
-]
+$$
 
-暂时关闭：
+这些权重只是初始值。实际应对各项做 EMA 归一化：
 
-```python
-evolution_magnitude_loss_weight = 0.0
-evolution_rollout_loss_weight = 0.0
+$$
+\widetilde L_i
+==============
+
+\frac{L_i}
+{\operatorname{stopgrad}(\operatorname{EMA}(L_i))}
+$$
+
+然后再加权，避免某个损失仅仅因为数值尺度大而支配训练。
+
+---
+
+# 六、20步 rollout 可以使用课程式训练，但最终必须训练到20步
+
+显存或训练稳定性有限时，可以：
+
+```text
+Epoch 0–2:  rollout horizon = 3
+Epoch 3–5:  rollout horizon = 6
+Epoch 6–9:  rollout horizon = 10
+Epoch 10+:  rollout horizon = 20
 ```
 
-预测长度：
+这是训练课程，不是硬冻结分阶段。
 
-```python
-evolution_forecast_steps = 1
-```
+最终模型必须在训练阶段实际经历：
 
-## 阶段S3：三步pure-free
+$$
+\hat R_0
+\rightarrow
+\hat R_1
+\rightarrow
+\cdots
+\rightarrow
+\hat R_{20}
+$$
 
-[
-\boxed{
-L_{S3}
-======
+否则无法真正优化第二小时强降水存活。
 
-L_{S1}
+---
+
+# 七、这次实验应该怎样处理
+
+当前 run 停止是正确的，不建议恢复并跑满50轮。
+
+这次实验已经给出足够明确的否定结果：
+
+> 在当前 teacher-forced 主导、3步短 rollout、弱 CSI 权重的联合目标下，全参数更新降低了业务 CSI。
+
+下一次不应只修改学习率，而应优先修改：
+
+1. rollout 从3步逐渐扩展到20步；
+2. CSI16/32 代理损失进入核心目标；
+3. 提高强雨像素权重；
+4. 加入边缘/梯度保持；
+5. 将 checkpoint 与 early stopping 直接绑定业务 CSI 组合指标；
+6. 分别记录 motion-only、source gain 和 full rollout，避免模块互相掩盖。
+
+一个可用于选模型的综合指标是：
+
+$$
+S=
+0.2,CSI_{16}^{0-1h}
 +
-0.5L_{\mathrm{roll,state}}
+0.3,CSI_{32}^{0-1h}
 +
-0.05L_{\mathrm{softCSI16}}
+0.2,CSI_{16}^{1-2h}
 +
-0.10L_{\mathrm{softCSI32}}
-+
-0.02L_{\mathrm{area}}
-+
-0.05L_{\mathrm{budget}}
-}
-]
+0.3,CSI_{32}^{1-2h}
+$$
 
-不使用scheduled sampling：
+同时设置 Bias 和 FAR 保护条件，防止单纯扩大降水面积骗取 CSI。
 
-```text
-teacher forcing mechanism branch = 100%
-free rollout branch = 0%
-```
-
-两条branch各自承担不同职责。
-
-# 七、source初始化也要同步修改
-
-不要继续使用±20。
-
-建议使用数据先验初始化regime：
-
-```python
-prior = torch.tensor([0.05, 0.90, 0.05])
-regime_head.bias.copy_(prior.log())
-```
-
-即大约：
-
-```text
-growth: -3.00
-steady: -0.105
-decay:  -3.00
-```
-
-幅度初始化为1%左右：
-
-```python
-growth_head.bias = logit(0.01) ≈ -4.60
-decay_head.bias  = logit(0.01) ≈ -4.60
-```
-
-这样初始有效source仍然极小：
-
-[
-0.05\times0.01\times C
-]
-
-但不会像 (-20) 那样几乎完全失去梯度。
-
-# 八、代码应该怎样改
-
-主要修改：
-
-```text
-openstl/methods/evolution_convlstm.py
-```
-
-新增：
-
-```python
-_teacher_forced_effective_source_terms()
-_free_rollout_source_terms()
-_soft_csi_loss()
-_source_guard_loss()
-_source_budget_loss()
-```
-
-重写：
-
-```python
-_factorized_source_training_step()
-```
-
-结构建议：
-
-```python
-def _factorized_source_training_step(self, batch_x, batch_y):
-    mechanism_result = self.model(
-        batch_x,
-        return_aux=True,
-        teacher_forcing=batch_y,
-        teacher_forcing_ratio=1.0,
-    )
-
-    mechanism_terms = self._teacher_forced_effective_source_terms(
-        mechanism_result,
-        batch_y,
-    )
-
-    if self.hparams.evolution_rollout_horizon > 1:
-        free_result = self.model(
-            batch_x,
-            return_aux=True,
-            teacher_forcing=None,
-            teacher_forcing_ratio=0.0,
-        )
-
-        rollout_terms = self._free_rollout_source_terms(
-            free_result,
-            batch_y,
-        )
-    else:
-        rollout_terms = {}
-
-    loss = (
-        mechanism_terms["effective_loss"]
-        + mechanism_terms["state_loss"]
-        + 0.25 * mechanism_terms["steady_loss"]
-        + 0.5 * mechanism_terms["guard_loss"]
-        + 0.05 * mechanism_terms["regime_loss"]
-    )
-
-    if rollout_terms:
-        loss = loss + (
-            0.5 * rollout_terms["state_loss"]
-            + 0.05 * rollout_terms["soft_csi_16"]
-            + 0.10 * rollout_terms["soft_csi_32"]
-            + 0.02 * rollout_terms["area_loss"]
-            + 0.05 * rollout_terms["budget_loss"]
-        )
-
-    return loss
-```
-
-同时修改：
-
-```text
-openstl/modules/temporal_unet_modules.py
-```
-
-调整source head bias初始化。当前代码中的±20初始化位置就在 `UNetFactorizedSourceHead.reset_parameters()`。
-
-# 九、validation和checkpoint也要改变
-
-目前 `val_loss`固定是归一化dBZ MSE。
-
-建议额外记录：
-
-```text
-val_free_rain_state_loss
-val_source_gain_vs_zero
-val_source_harm_fraction
-val_effective_growth_loss
-val_effective_decay_loss
-val_cumulative_source_mass
-val_intensity_ratio_0_1h
-val_intensity_ratio_1_2h
-```
-
-其中：
-
-[
-\text{source gain}
-==================
-
-## L_{\mathrm{motion-only}}
-
-L_{\mathrm{with-source}}
-]
-
-还要记录：
-
-[
-\text{harm fraction}
-====================
-
-P
-\left(
-|\hat R-Y|>|A-Y|
-\right)
-]
-
-checkpoint建议：
-
-```text
-best_val_csi.ckpt
-→ 最终主checkpoint
-
-best_val_mechanism.ckpt
-→ val_free_rain_state_loss 或 val_source_gain_vs_zero
-
-best_val_loss.ckpt
-→ 保留，但不作为source主结论
-```
-
-当前 `best_val_mechanism`仍监控 `val_loss`，实际上与 `best_val_loss`重复。
-
-# 十、建议的实验顺序
-
-## E0：zero-source
-
-使用当前已有zero-source配置，在相同：
-
-* motion checkpoint；
-* rain-rate operator；
-* displacement；
-* 20步free rollout；
-
-下建立基准。
-
-## E1：新损失单步
-
-```text
-effective + state + steady + guard
-forecast_steps=1
-3–5 epochs
-source_lr=1e-5
-```
-
-通过标准：
-
-* 单步state error优于advected baseline；
-* source harm fraction < 50%；
-* growth/decay scale ratio合理；
-* 20步free CSI相对zero-source下降不超过0.01。
-
-## E2：加入低权重regime
-
-```text
-regime weight=0.05
-```
-
-检查它是否改善解释性而不破坏CSI。
-
-## E3：三步pure-free
-
-加入free rollout rain-state和soft CSI。
-
-## E4：5/10步
-
-只有三步不出现：
-
-* intensity爆炸；
-  -过度清空；
-  -面积膨胀；
-  -CSI骤降；
-
-才继续。
-
-# 最重要的判断
-
-当前问题最可能不是简单的：
-
-```text
-state_loss 0.2太小
-rollout_loss 1.0太大
-```
-
-而是：
-
-[
-\boxed{
-\text{物理source标签}
-\quad\text{和}\quad
-\text{free-rollout误差修正}
-}
-]
-
-被塞进了同一个scheduled trajectory里。
-
-重新设计时要把两者彻底拆开：
-
-[
-\boxed{
-\text{Teacher-forced branch学习物理source}
-+
-\text{Pure-free branch学习递归稳定性}
-}
-]
-
-同时把监督对象从“分类概率和幅度各自正确”改成：
-
-[
-\boxed{
-p_g\alpha_gC^+
---------------
-
-p_d\alpha_dA
-}
-]
-
-这个真正进入演化方程的有效source。
+**结论就是：不是“loss 和业务指标偶尔不一致也正常”，而是当前代理目标没有完成它的职责。你们接下来真正应解决的核心问题，正是让优化目标在20步自由演化、强降水阈值和结构清晰度上与业务指标一致。**

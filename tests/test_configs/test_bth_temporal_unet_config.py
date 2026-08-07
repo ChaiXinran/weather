@@ -23,6 +23,16 @@ def test_temporal_unet_formal_config_matches_r4b_transport_controls():
         assert temporal[key] == baseline[key]
 
 
+def test_temporal_unet_bottleneck_convlstm_config_is_motion_only():
+    config = load_config(
+        'configs/bth_radar/'
+        'TemporalUNet_evolution_motion_bottleneck_convlstm.py')
+    assert config['temporal_unet_convlstm_scales'] == [3]
+    assert config['temporal_unet_convlstm_kernel'] == 3
+    assert not config['evolution_use_source']
+    assert config['epoch'] == 10
+
+
 def test_temporal_unet_full_source_config_is_factorized_free_rollout():
     config = load_config(
         'configs/bth_radar/TemporalUNet_evolution_factorized_s20.py')

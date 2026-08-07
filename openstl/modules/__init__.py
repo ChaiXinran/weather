@@ -18,7 +18,8 @@ from .simvp_modules import (BasicConv2d, ConvSC, GroupConv2d,
 from .mmvp_modules import (ResBlock, RRDB, ResidualDenseBlock_4C, Up, Conv3D, ConvLayer,
                            MatrixPredictor3DConv, SimpleMatrixPredictor3DConv_direct, PredictModel) 
 from .swinlstm_modules import UpSample, DownSample, STconvert
-from .temporal_unet_modules import (DWResidualBlock, FPNDecoder,
+from .temporal_unet_modules import (BottleneckConvLSTMFusion,
+                                    DWResidualBlock, FPNDecoder,
                                     SharedFrameEncoder,
                                     TemporalFeaturePyramid,
                                     TemporalWeightedFusion,
@@ -36,7 +37,8 @@ __all__ = [
     'SwinSubBlock', 'UniformerSubBlock', 'VANSubBlock', 'ViTSubBlock', 'TAUSubBlock',
     'ResBlock', 'RRDB', 'ResidualDenseBlock_4C', 'Up', 'Conv3D', 'ConvLayer',
     'MatrixPredictor3DConv', 'SimpleMatrixPredictor3DConv_direct', 'PredictModel',
-    'UpSample', 'DownSample', 'STconvert', 'DWResidualBlock', 'FPNDecoder',
+    'UpSample', 'DownSample', 'STconvert', 'BottleneckConvLSTMFusion',
+    'DWResidualBlock', 'FPNDecoder',
     'SharedFrameEncoder', 'TemporalFeaturePyramid',
     'TemporalWeightedFusion', 'UNetFactorizedSourceHead', 'UNetMotionHead'
     

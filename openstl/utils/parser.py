@@ -58,7 +58,8 @@ def create_parser():
                                 'SwinLSTM', 'swinlstm', 'swinlstm_d', 'swinlstm_b',
                                 'EvolutionConvLSTM', 'evolution_convlstm',
                                 'EvolutionTemporalUNet', 'evolutiontemporalunet',
-                                'evolution_temporal_unet'],
+                                'evolution_temporal_unet', 'DirectPhysicsHybrid',
+                                'directphysicshybrid', 'direct_physics_hybrid'],
                         help='Name of video prediction method to train (default: "SimVP")')
     parser.add_argument('--config_file', '-c', default=None, type=str,
                         help='Path to the default config file')

@@ -84,27 +84,83 @@ class TemporalWeightedFusion(nn.Module):
         return latest + correction
 
 
+class BottleneckConvLSTMFusion(nn.Module):
+    """Aggregate an encoded history with a spatially agnostic ConvLSTM.
+
+    The hidden width intentionally matches the encoder width, so the final
+    state can replace the former single-frame/weighted bottleneck without
+    changing the FPN interface.
+    """
+
+    def __init__(self, channels, kernel_size=3, forget_bias=1.0):
+        super().__init__()
+        if kernel_size % 2 == 0:
+            raise ValueError('ConvLSTM kernel size must be odd')
+        self.channels = int(channels)
+        self.forget_bias = float(forget_bias)
+        self.gates = nn.Conv2d(
+            2 * self.channels, 4 * self.channels,
+            kernel_size=kernel_size, padding=kernel_size // 2)
+
+    def forward(self, x):
+        if x.ndim != 5:
+            raise ValueError('temporal feature must be [B,T,C,H,W]')
+        if x.shape[2] != self.channels:
+            raise ValueError(
+                f'expected {self.channels} channels, got {x.shape[2]}')
+        hidden = x.new_zeros(x.shape[0], self.channels, *x.shape[-2:])
+        cell = torch.zeros_like(hidden)
+        for frame in x.unbind(dim=1):
+            gates = self.gates(torch.cat([frame, hidden], dim=1))
+            input_gate, forget_gate, candidate, output_gate = gates.chunk(
+                4, dim=1)
+            input_gate = torch.sigmoid(input_gate)
+            forget_gate = torch.sigmoid(
+                forget_gate + self.forget_bias)
+            candidate = torch.tanh(candidate)
+            output_gate = torch.sigmoid(output_gate)
+            cell = forget_gate * cell + input_gate * candidate
+            hidden = output_gate * torch.tanh(cell)
+        return hidden
+
+
 class TemporalFeaturePyramid(nn.Module):
     def __init__(self, in_channels, channels, blocks, mix_scales,
-                 temporal_kernel=3):
+                 temporal_kernel=3, convlstm_scales=None,
+                 convlstm_kernel=3):
         super().__init__()
         self.encoder = SharedFrameEncoder(in_channels, channels, blocks)
         self.mix_scales = tuple(int(index) for index in mix_scales)
+        self.convlstm_scales = tuple(
+            int(index) for index in (convlstm_scales or ()))
         if any(index < 0 or index >= len(channels) for index in self.mix_scales):
             raise ValueError('temporal mix scale is outside the encoder pyramid')
+        if any(index < 0 or index >= len(channels)
+               for index in self.convlstm_scales):
+            raise ValueError('ConvLSTM scale is outside the encoder pyramid')
         self.mixers = nn.ModuleDict({
             str(index): TemporalWeightedFusion(
                 channels[index], kernel_size=temporal_kernel)
             for index in self.mix_scales
+            if index not in self.convlstm_scales
+        })
+        self.convlstm_mixers = nn.ModuleDict({
+            str(index): BottleneckConvLSTMFusion(
+                channels[index], kernel_size=convlstm_kernel)
+            for index in self.convlstm_scales
         })
 
     def forward(self, history):
         temporal_features = self.encoder(history)
-        return [
-            self.mixers[str(index)](feature)
-            if index in self.mix_scales else feature[:, -1]
-            for index, feature in enumerate(temporal_features)
-        ]
+        fused = []
+        for index, feature in enumerate(temporal_features):
+            if index in self.convlstm_scales:
+                fused.append(self.convlstm_mixers[str(index)](feature))
+            elif index in self.mix_scales:
+                fused.append(self.mixers[str(index)](feature))
+            else:
+                fused.append(feature[:, -1])
+        return fused
 
 
 class FPNDecoder(nn.Module):

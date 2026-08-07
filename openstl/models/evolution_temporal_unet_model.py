@@ -25,9 +25,15 @@ class EvolutionTemporalUNet_Model(nn.Module):
             configs, 'evolution_head_channels', 128))
         temporal_kernel = int(getattr(
             configs, 'temporal_unet_temporal_kernel', 3))
+        convlstm_scales = list(getattr(
+            configs, 'temporal_unet_convlstm_scales', []))
+        convlstm_kernel = int(getattr(
+            configs, 'temporal_unet_convlstm_kernel', 3))
 
         self.backbone = TemporalFeaturePyramid(
-            in_channels, channels, blocks, mix_scales, temporal_kernel)
+            in_channels, channels, blocks, mix_scales, temporal_kernel,
+            convlstm_scales=convlstm_scales,
+            convlstm_kernel=convlstm_kernel)
         self.decoder = FPNDecoder(channels, fpn_channels)
         self.motion_head = UNetMotionHead(
             fpn_channels, head_channels, configs.aft_seq_length)

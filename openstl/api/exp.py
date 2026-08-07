@@ -168,7 +168,8 @@ class BaseExperiment(object):
         if args.method in ['simvp', 'tau', 'mmvp', 'wast',
                            'evolutionconvlstm', 'evolution_convlstm',
                            'evolutiontemporalunet',
-                           'evolution_temporal_unet']:
+                           'evolution_temporal_unet', 'directphysicshybrid',
+                           'direct_physics_hybrid']:
             input_dummy = torch.ones(1, args.pre_seq_length, C, H, W).to(device)
         elif args.method == 'phydnet':
             _tmp_input1 = torch.ones(1, args.pre_seq_length, C, H, W).to(device)

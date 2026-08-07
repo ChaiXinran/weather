@@ -43,6 +43,28 @@ def test_temporal_unet_multiscale_shapes_and_fpn_width():
     assert features['bottleneck'].shape == (1, 12, 9, 9)
 
 
+def test_temporal_unet_bottleneck_convlstm_shapes_and_gradients():
+    config = _config(height=16, width=18)
+    config.temporal_unet_convlstm_scales = [3]
+    config.temporal_unet_convlstm_kernel = 3
+    model = EvolutionTemporalUNet_Model(config)
+    history = torch.rand(2, 4, 1, 16, 18)
+    features = model.encode_history(history)
+    assert features['pyramid'][-1].shape == (2, 24, 2, 3)
+    features['bottleneck'].square().mean().backward()
+    mixer = model.backbone.convlstm_mixers['3']
+    assert mixer.gates.weight.grad is not None
+    assert torch.count_nonzero(mixer.gates.weight.grad) > 0
+
+
+def test_bottleneck_convlstm_replaces_weighted_fusion_at_same_scale():
+    config = _config()
+    config.temporal_unet_convlstm_scales = [3]
+    model = EvolutionTemporalUNet_Model(config)
+    assert '3' in model.backbone.convlstm_mixers
+    assert '3' not in model.backbone.mixers
+
+
 def test_temporal_unet_flow_respects_displacement_bound():
     model = EvolutionTemporalUNet_Model(_config())
     with torch.no_grad():
