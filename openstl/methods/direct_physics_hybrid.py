@@ -98,11 +98,38 @@ class DirectPhysicsHybrid(Base_method):
         gate_loss = gate_loss + F.binary_cross_entropy(
             result['raw_source_gate'].clamp(1e-5, 1 - 1e-5), source_target)
         total = total + float(self.hparams.get('hybrid_gate_supervision_weight', 0.1)) * gate_loss
+
+        event_steps = min(10, result['fused_rain'].shape[1])
+        direct_event = result['direct_rain'][:, :event_steps]
+        fused_event = result['fused_rain'][:, :event_steps]
+        target_event = target_rain[:, :event_steps]
+        threshold = float(self.hparams.get('hybrid_event_threshold', 16.0))
+        margin = float(self.hparams.get('hybrid_event_margin', 0.5))
+        event_temperature = float(self.hparams.get(
+            'hybrid_event_temperature', 1.0))
+        miss_mask = (direct_event < threshold) & (target_event >= threshold)
+        false_alarm_mask = ((direct_event >= threshold)
+                            & (target_event < threshold))
+        miss_penalty = F.softplus(
+            (threshold + margin - fused_event) / event_temperature)
+        false_alarm_penalty = F.softplus(
+            (fused_event - (threshold - margin)) / event_temperature)
+        miss_loss = (miss_penalty[miss_mask].mean()
+                     if miss_mask.any() else fused_event.new_zeros(()))
+        false_alarm_loss = (
+            false_alarm_penalty[false_alarm_mask].mean()
+            if false_alarm_mask.any() else fused_event.new_zeros(()))
+        event_loss = miss_loss + false_alarm_loss
+        total = total + float(self.hparams.get(
+            'hybrid_event_recovery_weight', 0.0)) * event_loss
         self.log('train_loss', total, on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_fused_r2d', loss, on_epoch=True)
         self.log('train_physics_aux', aux, on_epoch=True)
         self.log('train_residual_aux', residual_aux, on_epoch=True)
         self.log('train_gate_supervision', gate_loss, on_epoch=True)
+        self.log('train_event_miss16', miss_loss, on_epoch=True)
+        self.log('train_event_fa16', false_alarm_loss, on_epoch=True)
+        self.log('train_event_recovery16', event_loss, on_epoch=True)
         self.log('train_direct_anchor', anchor, on_epoch=True)
         self.log('train_blend_enabled', float(blend_enabled), on_epoch=True)
         self.log('train_blend_alpha_abs', result['blend_alpha'].abs().mean(), on_epoch=True)

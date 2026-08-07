@@ -139,6 +139,10 @@ class DirectPhysicsHybrid_Model(nn.Module):
         fused_rain = (direct_rain
                       + motion_weight * (motion_rain - direct_rain)
                       + source_weight * (source_candidate_rain - motion_rain))
+        motion_fused_rain = (
+            direct_rain + motion_weight * (motion_rain - direct_rain))
+        source_fused_rain = (
+            direct_rain + source_weight * (source_candidate_rain - motion_rain))
         prediction = rain_to_normalized_dbz(
             fused_rain.clamp_min(0), self.configs.radar_value_scale,
             self.configs.zr_a, self.configs.zr_b)
@@ -158,6 +162,15 @@ class DirectPhysicsHybrid_Model(nn.Module):
                         self.configs.zr_a, self.configs.zr_b),
                     direct_rain=direct_rain, motion_rain=motion_rain,
                     source_candidate_rain=source_candidate_rain,
+                    fused_rain=fused_rain,
+                    motion_fused_prediction=rain_to_normalized_dbz(
+                        motion_fused_rain.clamp_min(0),
+                        self.configs.radar_value_scale,
+                        self.configs.zr_a, self.configs.zr_b),
+                    source_fused_prediction=rain_to_normalized_dbz(
+                        source_fused_rain.clamp_min(0),
+                        self.configs.radar_value_scale,
+                        self.configs.zr_a, self.configs.zr_b),
                     motion_gate=motion_weight, source_gate=source_weight,
                     raw_motion_gate=motion_gate,
                     raw_source_gate=source_gate)
