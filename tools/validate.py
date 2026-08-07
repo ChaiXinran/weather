@@ -1,6 +1,7 @@
 """Validate an explicit checkpoint without training or full test evaluation."""
 
 import warnings
+import torch
 
 warnings.filterwarnings('ignore')
 
@@ -25,6 +26,14 @@ if __name__ == '__main__':
     experiment = BaseExperiment(args)
     # In motion-eval mode the method loads only backbone/decoder/motion_head
     # from evolution_motion_checkpoint; source-head stays at initialization.
+    if args.motion_eval_only:
+        checkpoint_path = None
+    else:
+        # PyTorch 2.6 defaults torch.load to weights_only=True, while legacy
+        # Lightning checkpoints contain trusted callback/optimizer metadata.
+        checkpoint = torch.load(
+            args.ckpt_path, map_location='cpu', weights_only=False)
+        experiment.method.load_state_dict(checkpoint['state_dict'], strict=True)
+        checkpoint_path = None
     experiment.trainer.validate(
-        experiment.method, experiment.data,
-        ckpt_path=None if args.motion_eval_only else args.ckpt_path)
+        experiment.method, experiment.data, ckpt_path=checkpoint_path)

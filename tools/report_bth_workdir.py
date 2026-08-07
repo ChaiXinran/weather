@@ -280,8 +280,12 @@ def main():
 
     args = argparse.Namespace(**params)
     experiment = BaseExperiment(args)
+    checkpoint_state = torch.load(
+        checkpoint, map_location="cpu", weights_only=False)
+    experiment.method.load_state_dict(
+        checkpoint_state["state_dict"], strict=True)
     results = experiment.trainer.validate(
-        experiment.method, experiment.data, ckpt_path=str(checkpoint))
+        experiment.method, experiment.data, ckpt_path=None)
     if not results:
         raise RuntimeError("Validation returned no metrics")
     metrics = results[0]

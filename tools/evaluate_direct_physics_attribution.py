@@ -159,7 +159,8 @@ def main():
         "ex_name": f"{work_dir.name}_attribution",
     })
     experiment = BaseExperiment(argparse.Namespace(**params))
-    state = torch.load(checkpoint, map_location="cpu")
+    state = torch.load(
+        checkpoint, map_location="cpu", weights_only=False)
     experiment.method.load_state_dict(state["state_dict"], strict=True)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     method = experiment.method.to(device).eval()

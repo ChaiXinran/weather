@@ -412,3 +412,47 @@ CSI16(0-1h) + CSI32(0-1h) + CSI16(1-2h) + 2 * CSI32(1-2h)
 | `zr_b` | `1.6` |
 | `zr_fit_artifact` | `.research/local_zr_v2.json` |
 | `zr_selection` | `marshall_palmer_validation_winner` |
+
+# DirectPhysicsHybrid Branch Attribution
+
+Checkpoint: `/root/weather/work_dirs/bth_direct_physics_hybrid_v2_clean_manifest_10ep_seed0/checkpoints/best_val_csi.ckpt`
+
+Validation only; the Test split was not used.
+
+## Branch Metrics
+
+| Branch | Period | Threshold | CSI | POD | FAR | Bias |
+|---|---|---:|---:|---:|---:|---:|
+| direct | 0_1h | 16 | 0.380877 | 0.550659 | 0.447365 | 0.996425 |
+| direct | 0_1h | 32 | 0.271653 | 0.519130 | 0.637007 | 1.430136 |
+| direct | 1_2h | 16 | 0.138186 | 0.292411 | 0.792392 | 1.408475 |
+| direct | 1_2h | 32 | 0.070976 | 0.236923 | 0.907992 | 2.575016 |
+| motion_only | 0_1h | 16 | 0.382438 | 0.555065 | 0.448493 | 1.006451 |
+| motion_only | 0_1h | 32 | 0.272643 | 0.521207 | 0.636254 | 1.432887 |
+| motion_only | 1_2h | 16 | 0.139047 | 0.297909 | 0.793179 | 1.440420 |
+| motion_only | 1_2h | 32 | 0.071406 | 0.240400 | 0.907789 | 2.607077 |
+| source_only | 0_1h | 16 | 0.380996 | 0.551214 | 0.447674 | 0.997988 |
+| source_only | 0_1h | 32 | 0.271719 | 0.519521 | 0.637079 | 1.431498 |
+| source_only | 1_2h | 16 | 0.138239 | 0.292658 | 0.792397 | 1.409700 |
+| source_only | 1_2h | 32 | 0.070992 | 0.237069 | 0.907986 | 2.576440 |
+| fused | 0_1h | 16 | 0.382616 | 0.555716 | 0.448765 | 1.008130 |
+| fused | 0_1h | 32 | 0.272644 | 0.521497 | 0.636394 | 1.434236 |
+| fused | 1_2h | 16 | 0.139123 | 0.298206 | 0.793154 | 1.441686 |
+| fused | 1_2h | 32 | 0.071406 | 0.240486 | 0.907802 | 2.608369 |
+
+## Event Transitions Relative to Direct
+
+| Branch | Period | Threshold | Miss->Hit | Hit->Miss | FA->Correct | Correct->FA |
+|---|---|---:|---:|---:|---:|---:|
+| motion_only | 0_1h | 16 | 3055 | 1310 | 2798 | 5024 |
+| motion_only | 0_1h | 32 | 1013 | 705 | 2438 | 2538 |
+| motion_only | 1_2h | 16 | 2561 | 381 | 2165 | 12652 |
+| motion_only | 1_2h | 32 | 663 | 138 | 2181 | 6497 |
+| source_only | 0_1h | 16 | 221 | 1 | 0 | 399 |
+| source_only | 0_1h | 32 | 58 | 0 | 0 | 144 |
+| source_only | 1_2h | 16 | 98 | 0 | 2 | 390 |
+| source_only | 1_2h | 32 | 22 | 0 | 0 | 193 |
+| fused | 0_1h | 16 | 3176 | 1173 | 2571 | 5204 |
+| fused | 0_1h | 32 | 1031 | 680 | 2352 | 2609 |
+| fused | 1_2h | 16 | 2634 | 336 | 1977 | 12848 |
+| fused | 1_2h | 32 | 669 | 131 | 2085 | 6583 |
