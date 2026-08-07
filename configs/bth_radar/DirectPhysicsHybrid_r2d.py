@@ -30,6 +30,7 @@ hybrid_direct_anchor_weight = 0.10
 hybrid_alpha_regularization = 0.01
 hybrid_flow_regularization = 1e-4
 hybrid_source_regularization = 1e-5
+hybrid_residual_aux_weight = 0.1
 
 lr = 1e-4
 batch_size = 4

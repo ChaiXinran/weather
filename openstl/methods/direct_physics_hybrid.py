@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from openstl.models import DirectPhysicsHybrid_Model
+from openstl.modules.evolution_operator import normalized_dbz_to_rain
 from .base_method import Base_method
 
 
@@ -49,7 +50,19 @@ class DirectPhysicsHybrid(Base_method):
         aux_weight = float(
             self.hparams.hybrid_warmup_physics_weight if not blend_enabled
             else self.hparams.hybrid_physics_aux_weight)
+        direct_rain = result['direct_rain']
+        target_rain = normalized_dbz_to_rain(
+            batch_y, self.hparams.radar_value_scale,
+            self.hparams.zr_a, self.hparams.zr_b)
+        physics_residual = result['source_candidate_rain'] - direct_rain
+        target_residual = target_rain - direct_rain.detach()
+        residual_aux = F.smooth_l1_loss(
+            physics_residual / max(float(self.hparams.hybrid_max_source_rain), 1.0),
+            target_residual / max(float(self.hparams.hybrid_max_source_rain), 1.0),
+            beta=0.05)
         total = (loss + aux_weight * aux
+                 + float(self.hparams.get('hybrid_residual_aux_weight', 0.1))
+                 * residual_aux
                  + float(self.hparams.hybrid_direct_anchor_weight) * anchor
                  + float(self.hparams.hybrid_flow_regularization) * flow_reg
                  + float(self.hparams.hybrid_source_regularization) * source_reg
@@ -58,10 +71,15 @@ class DirectPhysicsHybrid(Base_method):
         self.log('train_loss', total, on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_fused_r2d', loss, on_epoch=True)
         self.log('train_physics_aux', aux, on_epoch=True)
+        self.log('train_residual_aux', residual_aux, on_epoch=True)
         self.log('train_direct_anchor', anchor, on_epoch=True)
         self.log('train_blend_enabled', float(blend_enabled), on_epoch=True)
         self.log('train_blend_alpha_abs', result['blend_alpha'].abs().mean(), on_epoch=True)
         self.log('train_learned_alpha_abs', result['learned_blend_alpha'].abs().mean(), on_epoch=True)
         self.log('train_residual_flow_abs', flow_reg, on_epoch=True)
         self.log('train_source_rain_abs', source_reg, on_epoch=True)
+        self.log('train_motion_gate_abs', result['motion_gate'].abs().mean(),
+                 on_epoch=True)
+        self.log('train_source_gate_abs', result['source_gate'].abs().mean(),
+                 on_epoch=True)
         return total

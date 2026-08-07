@@ -41,10 +41,16 @@ class DirectPhysicsHybrid_Model(nn.Module):
             DWResidualBlock(head_channels))
         self.flow_head = nn.Conv2d(head_channels, 2, 1)
         self.source_head = nn.Conv2d(head_channels, configs.in_shape[1], 1)
+        self.motion_gate_head = nn.Conv2d(head_channels, 1, 1)
+        self.source_gate_head = nn.Conv2d(head_channels, 1, 1)
         nn.init.zeros_(self.flow_head.weight)
         nn.init.zeros_(self.flow_head.bias)
         nn.init.zeros_(self.source_head.weight)
         nn.init.zeros_(self.source_head.bias)
+        nn.init.zeros_(self.motion_gate_head.weight)
+        nn.init.zeros_(self.motion_gate_head.bias)
+        nn.init.zeros_(self.source_gate_head.weight)
+        nn.init.zeros_(self.source_gate_head.bias)
         self.blend_logit = nn.Parameter(torch.zeros(configs.aft_seq_length))
         self.operator = EvolutionOperator(
             field_space='rain_rate', value_scale=configs.radar_value_scale,
@@ -101,6 +107,8 @@ class DirectPhysicsHybrid_Model(nn.Module):
         flow = float(self.configs.hybrid_max_residual_displacement) * torch.tanh(
             self.flow_head(hidden)).reshape(b, t, 2, h, w)
         source_logit = self.source_head(hidden).reshape(b, t, c, h, w)
+        motion_gate_logit = self.motion_gate_head(hidden).reshape(b, t, 1, h, w)
+        source_gate_logit = self.source_gate_head(hidden).reshape(b, t, 1, h, w)
 
         flat_direct = direct.reshape(b*t, c, h, w)
         warped = self.operator.warp(
@@ -112,17 +120,46 @@ class DirectPhysicsHybrid_Model(nn.Module):
         physics = rain_to_normalized_dbz(
             (warped_rain + source_rain).clamp_min(0),
             self.configs.radar_value_scale, self.configs.zr_a, self.configs.zr_b)
-        learned_alpha = (
-            float(self.configs.hybrid_alpha_max) * torch.tanh(self.blend_logit))
-        # During physics warm-up the deployable prediction remains exactly the
-        # loaded direct forecast; the auxiliary physics loss still trains all
-        # correction features and heads.
-        alpha = learned_alpha if blend_enabled else learned_alpha * 0.0
-        prediction = direct + alpha[None, :, None, None, None] * (physics - direct)
+        direct_rain = normalized_dbz_to_rain(
+            direct, self.configs.radar_value_scale,
+            self.configs.zr_a, self.configs.zr_b)
+        motion_rain = warped_rain
+        source_candidate_rain = (warped_rain + source_rain).clamp_min(0)
+        alpha_scale = float(self.configs.hybrid_alpha_max)
+        learned_alpha = alpha_scale * torch.tanh(self.blend_logit)
+        spatial_motion_alpha = alpha_scale * torch.tanh(motion_gate_logit)
+        spatial_source_alpha = alpha_scale * torch.tanh(source_gate_logit)
+        if blend_enabled:
+            # The spatial gates are themselves zero-start residual weights.
+            # Do not multiply them by the zero-start global alpha: that would
+            # make both gate gradients identically zero at initialization.
+            motion_weight = spatial_motion_alpha
+            source_weight = spatial_source_alpha
+        else:
+            motion_weight = torch.zeros_like(spatial_motion_alpha)
+            source_weight = torch.zeros_like(spatial_source_alpha)
+        fused_rain = (direct_rain
+                      + motion_weight * (motion_rain - direct_rain)
+                      + source_weight * (source_candidate_rain - motion_rain))
+        prediction = rain_to_normalized_dbz(
+            fused_rain.clamp_min(0), self.configs.radar_value_scale,
+            self.configs.zr_a, self.configs.zr_b)
         if not return_aux:
             return prediction
         return dict(prediction=prediction, direct_prediction=direct,
                     physics_prediction=physics, residual_flow=flow,
                     source_rain=source_rain, growth=source_rain.clamp_min(0),
-                    decay=(-source_rain).clamp_min(0), blend_alpha=alpha,
-                    learned_blend_alpha=learned_alpha)
+                    decay=(-source_rain).clamp_min(0),
+                    blend_alpha=motion_weight + source_weight,
+                    learned_blend_alpha=learned_alpha,
+                    motion_prediction=rain_to_normalized_dbz(
+                        motion_rain.clamp_min(0), self.configs.radar_value_scale,
+                        self.configs.zr_a, self.configs.zr_b),
+                    source_prediction=rain_to_normalized_dbz(
+                        source_candidate_rain, self.configs.radar_value_scale,
+                        self.configs.zr_a, self.configs.zr_b),
+                    direct_rain=direct_rain, motion_rain=motion_rain,
+                    source_candidate_rain=source_candidate_rain,
+                    motion_gate=motion_weight, source_gate=source_weight,
+                    raw_motion_gate=spatial_motion_alpha,
+                    raw_source_gate=spatial_source_alpha)
