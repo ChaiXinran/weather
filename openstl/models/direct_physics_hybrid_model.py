@@ -58,7 +58,7 @@ class DirectPhysicsHybrid_Model(nn.Module):
     def load_direct_checkpoint(self, path):
         if not path or not os.path.isfile(path):
             raise FileNotFoundError(f'direct ConvLSTM checkpoint not found: {path}')
-        checkpoint = torch.load(path, map_location='cpu')
+        checkpoint = torch.load(path, map_location='cpu', weights_only=False)
         state = checkpoint.get('state_dict', checkpoint)
         mapped = {}
         for key, value in state.items():

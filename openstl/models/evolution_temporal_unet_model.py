@@ -224,7 +224,7 @@ class EvolutionTemporalUNet_Model(nn.Module):
         return result if return_aux else result['prediction']
 
     def load_pretrained_motion(self, checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
         state = checkpoint.get('state_dict', checkpoint)
         prefixes = ('backbone.', 'decoder.', 'motion_head.')
         extracted = {}
@@ -242,7 +242,7 @@ class EvolutionTemporalUNet_Model(nn.Module):
         return len(extracted)
 
     def load_pretrained_source(self, checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
         state = checkpoint.get('state_dict', checkpoint)
         own_state = self.state_dict()
         extracted = {}

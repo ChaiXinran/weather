@@ -41,7 +41,7 @@ class BaseExperiment(object):
             raise ValueError(
                 '--ckpt_path and --init_from_ckpt are mutually exclusive')
         if args.init_from_ckpt:
-            checkpoint = torch.load(args.init_from_ckpt, map_location='cpu')
+            checkpoint = torch.load(args.init_from_ckpt, weights_only=False, map_location='cpu')
             if 'state_dict' not in checkpoint:
                 raise KeyError(
                     f'Checkpoint has no state_dict: {args.init_from_ckpt}')
@@ -151,10 +151,10 @@ class BaseExperiment(object):
 
     def test(self):
         if self.args.ckpt_path:
-            ckpt = torch.load(self.args.ckpt_path, map_location='cpu')
+            ckpt = torch.load(self.args.ckpt_path, weights_only=False, map_location='cpu')
             self.method.load_state_dict(ckpt['state_dict'])
         elif self.args.test == True:
-            ckpt = torch.load(osp.join(self.save_dir, 'checkpoints', 'best.ckpt'))
+            ckpt = torch.load(osp.join(self.save_dir, 'checkpoints', 'best.ckpt'), weights_only=False)
             self.method.load_state_dict(ckpt['state_dict'])
         self.trainer.test(self.method, self.data)
     

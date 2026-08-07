@@ -421,7 +421,7 @@ class EvolutionConvLSTM_Model(nn.Module):
 
     def load_pretrained_motion(self, checkpoint_path):
         """Load encoder and raw motion head while leaving a new gate untouched."""
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
         state = checkpoint.get('state_dict', checkpoint)
         prefixes = ('cell_list.', 'motion_head.')
         extracted = {}
@@ -439,7 +439,7 @@ class EvolutionConvLSTM_Model(nn.Module):
 
     def load_pretrained_source(self, checkpoint_path):
         """Load compatible source tensors while leaving newly added heads fresh."""
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
         state = checkpoint.get('state_dict', checkpoint)
         prefixes = ('factorized_trunk.', 'regime_head.', 'growth_head.',
                     'decay_head.')
@@ -455,7 +455,7 @@ class EvolutionConvLSTM_Model(nn.Module):
         return len(extracted)
 
     def load_pretrained_encoder(self, checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
         state = checkpoint.get('state_dict', checkpoint)
         extracted = {}
         for key, value in state.items():
