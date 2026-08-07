@@ -56,7 +56,8 @@ def fmt(value):
     return "n/a" if value is None else f"{value:.6f}"
 
 
-def write_tables(output_dir, rows, failures, include_rain_truth=False):
+def write_tables(output_dir, rows, failures, skipped,
+                 include_rain_truth=False):
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "bth_model_comparison.csv"
     fields = (("val_csi_score",) + PERIOD_FIELDS + LEAD_FIELDS)
@@ -115,10 +116,19 @@ def write_tables(output_dir, rows, failures, include_rain_truth=False):
     if failures:
         lines.extend(["", "## Failed Experiments", ""])
         lines.extend(f"- `{name}`: {reason}" for name, reason in failures)
+    if skipped:
+        lines.extend(["", "## Skipped Directories", ""])
+        lines.extend(f"- `{name}`: {reason}" for name, reason in skipped)
     (output_dir / "bth_model_comparison.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8")
     (output_dir / "failures.json").write_text(
         json.dumps(dict(failures), ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "scan_inventory.json").write_text(
+        json.dumps({
+            "evaluated": [row["experiment"] for row in rows],
+            "failed": dict(failures),
+            "skipped": dict(skipped),
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def remove_empty_workdirs(work_root):
@@ -156,11 +166,26 @@ def main():
     if options.remove_empty_workdirs:
         remove_empty_workdirs(work_root)
     reporter = Path(__file__).with_name("report_bth_workdir.py")
-    rows, failures = [], []
-    experiments = sorted(
-        path for path in work_root.iterdir()
-        if path.is_dir() and (path / "model_param.json").is_file()
-        and any((path / "checkpoints").glob("*.ckpt")))
+    rows, failures, skipped = [], [], []
+    experiments = []
+    for path in sorted(item for item in work_root.iterdir() if item.is_dir()):
+        if path.resolve() == output_dir.resolve():
+            continue
+        checkpoint_dir = path / "checkpoints"
+        if not checkpoint_dir.is_dir():
+            skipped.append((path.name, "no checkpoints directory"))
+            continue
+        if not any(checkpoint_dir.glob("*.ckpt")):
+            skipped.append((path.name, "checkpoints directory is empty"))
+            continue
+        if not (path / "model_param.json").is_file():
+            skipped.append((path.name, "checkpoint exists but model_param.json is missing"))
+            continue
+        experiments.append(path)
+
+    print(
+        f"Scanned {len(experiments) + len(skipped)} directories: "
+        f"{len(experiments)} evaluable, {len(skipped)} skipped.", flush=True)
 
     for index, experiment in enumerate(experiments, 1):
         report = experiment / "validation_report.md"
@@ -194,7 +219,12 @@ def main():
         except Exception as error:
             failures.append((experiment.name, str(error)))
         write_tables(
-            output_dir, rows, failures,
+            output_dir, rows, failures, skipped,
+            include_rain_truth=options.compare_rain_truth)
+
+    if not experiments:
+        write_tables(
+            output_dir, rows, failures, skipped,
             include_rain_truth=options.compare_rain_truth)
 
     print(f"Summary written to {output_dir}")
