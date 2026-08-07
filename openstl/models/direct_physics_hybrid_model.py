@@ -48,10 +48,9 @@ class DirectPhysicsHybrid_Model(nn.Module):
         nn.init.zeros_(self.source_head.weight)
         nn.init.zeros_(self.source_head.bias)
         nn.init.zeros_(self.motion_gate_head.weight)
-        nn.init.zeros_(self.motion_gate_head.bias)
+        nn.init.constant_(self.motion_gate_head.bias, -8.0)
         nn.init.zeros_(self.source_gate_head.weight)
-        nn.init.zeros_(self.source_gate_head.bias)
-        self.blend_logit = nn.Parameter(torch.zeros(configs.aft_seq_length))
+        nn.init.constant_(self.source_gate_head.bias, -8.0)
         self.operator = EvolutionOperator(
             field_space='rain_rate', value_scale=configs.radar_value_scale,
             zr_a=configs.zr_a, zr_b=configs.zr_b)
@@ -125,19 +124,18 @@ class DirectPhysicsHybrid_Model(nn.Module):
             self.configs.zr_a, self.configs.zr_b)
         motion_rain = warped_rain
         source_candidate_rain = (warped_rain + source_rain).clamp_min(0)
-        alpha_scale = float(self.configs.hybrid_alpha_max)
-        learned_alpha = alpha_scale * torch.tanh(self.blend_logit)
-        spatial_motion_alpha = alpha_scale * torch.tanh(motion_gate_logit)
-        spatial_source_alpha = alpha_scale * torch.tanh(source_gate_logit)
+        motion_gate = torch.sigmoid(motion_gate_logit)
+        source_gate = torch.sigmoid(source_gate_logit)
+        motion_alpha_max = float(getattr(
+            self.configs, 'hybrid_motion_alpha_max', 0.5))
+        source_alpha_max = float(getattr(
+            self.configs, 'hybrid_source_alpha_max', 0.25))
         if blend_enabled:
-            # The spatial gates are themselves zero-start residual weights.
-            # Do not multiply them by the zero-start global alpha: that would
-            # make both gate gradients identically zero at initialization.
-            motion_weight = spatial_motion_alpha
-            source_weight = spatial_source_alpha
+            motion_weight = motion_alpha_max * motion_gate
+            source_weight = source_alpha_max * source_gate
         else:
-            motion_weight = torch.zeros_like(spatial_motion_alpha)
-            source_weight = torch.zeros_like(spatial_source_alpha)
+            motion_weight = torch.zeros_like(motion_gate)
+            source_weight = torch.zeros_like(source_gate)
         fused_rain = (direct_rain
                       + motion_weight * (motion_rain - direct_rain)
                       + source_weight * (source_candidate_rain - motion_rain))
@@ -151,7 +149,7 @@ class DirectPhysicsHybrid_Model(nn.Module):
                     source_rain=source_rain, growth=source_rain.clamp_min(0),
                     decay=(-source_rain).clamp_min(0),
                     blend_alpha=motion_weight + source_weight,
-                    learned_blend_alpha=learned_alpha,
+                    learned_blend_alpha=motion_weight + source_weight,
                     motion_prediction=rain_to_normalized_dbz(
                         motion_rain.clamp_min(0), self.configs.radar_value_scale,
                         self.configs.zr_a, self.configs.zr_b),
@@ -161,5 +159,5 @@ class DirectPhysicsHybrid_Model(nn.Module):
                     direct_rain=direct_rain, motion_rain=motion_rain,
                     source_candidate_rain=source_candidate_rain,
                     motion_gate=motion_weight, source_gate=source_weight,
-                    raw_motion_gate=spatial_motion_alpha,
-                    raw_source_gate=spatial_source_alpha)
+                    raw_motion_gate=motion_gate,
+                    raw_source_gate=source_gate)

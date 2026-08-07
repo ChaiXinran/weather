@@ -16,12 +16,22 @@ class DirectPhysicsHybrid(Base_method):
         gate_lr_scale = float(self.hparams.get('hybrid_gate_lr_scale', 1.0))
         if not 0.0 < gate_lr_scale <= 1.0:
             raise ValueError('hybrid_gate_lr_scale must be in (0, 1]')
-        self.model.blend_logit.register_hook(
-            lambda gradient: gradient * gate_lr_scale)
+        for head in (self.model.motion_gate_head, self.model.source_gate_head):
+            for parameter in head.parameters():
+                parameter.register_hook(lambda gradient: gradient * gate_lr_scale)
         print(f'Loaded {count} tensors from direct ConvLSTM checkpoint')
 
     def _build_model(self, **args):
         return DirectPhysicsHybrid_Model(self.hparams)
+
+    @staticmethod
+    def _flow_smoothness(flow):
+        spatial = (flow[..., 1:, :] - flow[..., :-1, :]).abs().mean()
+        spatial = spatial + (flow[..., :, 1:] - flow[..., :, :-1]).abs().mean()
+        temporal = flow.new_zeros(())
+        if flow.shape[1] > 1:
+            temporal = (flow[:, 1:] - flow[:, :-1]).abs().mean()
+        return spatial + temporal
 
     def forward(self, batch_x, batch_y=None, **kwargs):
         # Warm-up is a training-only policy. Validation and deployment must
@@ -45,7 +55,7 @@ class DirectPhysicsHybrid(Base_method):
         anchor = F.smooth_l1_loss(
             result['prediction'], result['direct_prediction'].detach(),
             beta=0.02)
-        flow_reg = result['residual_flow'].abs().mean()
+        flow_reg = self._flow_smoothness(result['residual_flow'])
         source_reg = result['source_rain'].abs().mean()
         aux_weight = float(
             self.hparams.hybrid_warmup_physics_weight if not blend_enabled
@@ -60,18 +70,39 @@ class DirectPhysicsHybrid(Base_method):
             physics_residual / max(float(self.hparams.hybrid_max_source_rain), 1.0),
             target_residual / max(float(self.hparams.hybrid_max_source_rain), 1.0),
             beta=0.05)
+        anchor_weight = float(self.hparams.hybrid_direct_anchor_weight)
+        if blend_enabled:
+            anchor_weight = float(self.hparams.get(
+                'hybrid_direct_anchor_after_warmup', 0.02))
         total = (loss + aux_weight * aux
                  + float(self.hparams.get('hybrid_residual_aux_weight', 0.1))
                  * residual_aux
-                 + float(self.hparams.hybrid_direct_anchor_weight) * anchor
+                 + anchor_weight * anchor
                  + float(self.hparams.hybrid_flow_regularization) * flow_reg
                  + float(self.hparams.hybrid_source_regularization) * source_reg
-                 + float(self.hparams.hybrid_alpha_regularization)
-                 * result['learned_blend_alpha'].abs().mean())
+                 + float(self.hparams.get('hybrid_gate_regularization', 0.01))
+                 * (result['motion_gate'].abs().mean()
+                    + result['source_gate'].abs().mean()))
+
+        # Teach each gate to activate only when its candidate improves the
+        # preceding candidate on the current target. The target is detached,
+        # so the gate cannot change the candidate it is supervising.
+        temperature = float(self.hparams.get('hybrid_gate_temperature', 0.05))
+        direct_error = (result['direct_prediction'] - batch_y).abs().mean(2, keepdim=True)
+        motion_error = (result['motion_prediction'] - batch_y).abs().mean(2, keepdim=True)
+        source_error = (result['source_prediction'] - batch_y).abs().mean(2, keepdim=True)
+        motion_target = torch.sigmoid((direct_error - motion_error).detach() / max(temperature, 1e-6))
+        source_target = torch.sigmoid((motion_error - source_error).detach() / max(temperature, 1e-6))
+        gate_loss = F.binary_cross_entropy(
+            result['raw_motion_gate'].clamp(1e-5, 1 - 1e-5), motion_target)
+        gate_loss = gate_loss + F.binary_cross_entropy(
+            result['raw_source_gate'].clamp(1e-5, 1 - 1e-5), source_target)
+        total = total + float(self.hparams.get('hybrid_gate_supervision_weight', 0.1)) * gate_loss
         self.log('train_loss', total, on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_fused_r2d', loss, on_epoch=True)
         self.log('train_physics_aux', aux, on_epoch=True)
         self.log('train_residual_aux', residual_aux, on_epoch=True)
+        self.log('train_gate_supervision', gate_loss, on_epoch=True)
         self.log('train_direct_anchor', anchor, on_epoch=True)
         self.log('train_blend_enabled', float(blend_enabled), on_epoch=True)
         self.log('train_blend_alpha_abs', result['blend_alpha'].abs().mean(), on_epoch=True)
