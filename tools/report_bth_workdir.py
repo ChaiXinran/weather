@@ -6,6 +6,7 @@ import re
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from openstl.api import BaseExperiment
@@ -34,6 +35,83 @@ def metric(metrics, key):
 
 def fmt(value, digits=6):
     return "n/a" if value is None else f"{value:.{digits}f}"
+
+
+def lead_metric(metrics, stem, lead_minutes):
+    return metric(metrics, f"{stem}_lead_{lead_minutes:03d}m")
+
+
+def evaluate_rain_truth(experiment, params):
+    """Evaluate predictions against aligned RAIN PNG validation targets."""
+    loader = experiment.data.valid_loader
+    dataset = loader.dataset
+    if getattr(dataset, "rain_frames", None) is None:
+        return {}
+    thresholds = tuple(float(value) for value in params.get(
+        "val_precip_thresholds", [16.0, 32.0]))
+    lead_count = int(params.get("aft_seq_length", 20))
+    shape = (len(thresholds), lead_count)
+    hits = np.zeros(shape, dtype=np.int64)
+    false_alarms = np.zeros(shape, dtype=np.int64)
+    misses = np.zeros(shape, dtype=np.int64)
+    method = experiment.method
+    method.eval()
+    sample_offset = 0
+    with torch.inference_mode():
+        for batch_x, batch_y in loader:
+            batch_size = batch_x.shape[0]
+            indices = range(sample_offset, sample_offset + batch_size)
+            rain_true = dataset.rain_targets(indices) * 35.0
+            batch_x = batch_x.to(method.device, non_blocking=True)
+            batch_y = batch_y.to(method.device, non_blocking=True)
+            rain_pred = method._to_precipitation(
+                method(batch_x, batch_y)).detach().cpu().numpy()
+            valid = np.isfinite(rain_true) & np.isfinite(rain_pred)
+            for threshold_index, threshold in enumerate(thresholds):
+                pred_event = (rain_pred >= threshold) & valid
+                true_event = (rain_true >= threshold) & valid
+                axes = (0, 2, 3, 4)
+                hits[threshold_index] += (
+                    pred_event & true_event).sum(axis=axes)
+                false_alarms[threshold_index] += (
+                    pred_event & ~true_event).sum(axis=axes)
+                misses[threshold_index] += (
+                    ~pred_event & true_event & valid).sum(axis=axes)
+            sample_offset += batch_size
+
+    def ratio(numerator, denominator):
+        return float(numerator / denominator) if denominator else float("nan")
+
+    result = {}
+    period_width = min(10, lead_count)
+    for threshold_index, threshold in enumerate(thresholds):
+        label = f"{threshold:g}"
+        for lead_index in range(lead_count):
+            lead = (lead_index + 1) * int(params.get("lead_minutes", 6))
+            h = hits[threshold_index, lead_index]
+            fa = false_alarms[threshold_index, lead_index]
+            m = misses[threshold_index, lead_index]
+            suffix = f"{label}_lead_{lead:03d}m"
+            result[f"rain_truth_val_csi_{suffix}"] = ratio(h, h + fa + m)
+            result[f"rain_truth_val_pod_{suffix}"] = ratio(h, h + m)
+            result[f"rain_truth_val_far_{suffix}"] = ratio(fa, h + fa)
+        for period_name, start, end in (
+                ("0_1h", 0, period_width),
+                ("1_2h", period_width, lead_count)):
+            h = hits[threshold_index, start:end].sum()
+            fa = false_alarms[threshold_index, start:end].sum()
+            m = misses[threshold_index, start:end].sum()
+            suffix = f"{label}_{period_name}"
+            result[f"rain_truth_val_csi_{suffix}"] = ratio(h, h + fa + m)
+            result[f"rain_truth_val_pod_{suffix}"] = ratio(h, h + m)
+            result[f"rain_truth_val_far_{suffix}"] = ratio(fa, h + fa)
+    if 16.0 in thresholds and 32.0 in thresholds and lead_count > period_width:
+        result["rain_truth_val_csi_score"] = (
+            result["rain_truth_val_csi_16_0_1h"]
+            + result["rain_truth_val_csi_32_0_1h"]
+            + result["rain_truth_val_csi_16_1_2h"]
+            + 2.0 * result["rain_truth_val_csi_32_1_2h"])
+    return result
 
 
 def find_checkpoint(work_dir, explicit=None):
@@ -98,6 +176,7 @@ def build_report(work_dir, checkpoint, params, metrics, experiment):
     loss = metric(metrics, "val_loss_epoch")
     if loss is None:
         loss = metric(metrics, "val_loss")
+    has_rain_truth = "rain_truth_val_csi_score" in metrics
     lines = [
         f"# {work_dir.name} Validation Report",
         "",
@@ -174,9 +253,56 @@ def build_report(work_dir, checkpoint, params, metrics, experiment):
         f"| Intensity ratio | {fmt(metric(metrics, 'val_intensity_ratio_0_1h'))} | "
         f"{fmt(metric(metrics, 'val_intensity_ratio_1_2h'))} |")
 
+    if has_rain_truth:
+        lines.extend([
+            "",
+            "### Rain-PNG Truth Period Metrics",
+            "",
+            f"Rain-PNG weighted CSI score: **{fmt(metric(metrics, 'rain_truth_val_csi_score'))}**",
+            "",
+            "| Metric | First hour | Second hour |",
+            "|---|---:|---:|",
+        ])
+        for label, stem in (
+                ("CSI at 16 mm/h", "rain_truth_val_csi_16"),
+                ("CSI at 32 mm/h", "rain_truth_val_csi_32"),
+                ("POD at 16 mm/h", "rain_truth_val_pod_16"),
+                ("POD at 32 mm/h", "rain_truth_val_pod_32"),
+                ("FAR at 16 mm/h", "rain_truth_val_far_16"),
+                ("FAR at 32 mm/h", "rain_truth_val_far_32")):
+            lines.append(
+                f"| {label} | {fmt(metric(metrics, stem + '_0_1h'))} | "
+                f"{fmt(metric(metrics, stem + '_1_2h'))} |")
+
     lines.extend([
         "",
-        "## 5. Lead-Time Metrics",
+        "## 5. Key Forecast-Time CSI",
+        "",
+        "These are single forecast frames, not averages over an hour.",
+        "",
+        "| Forecast time | CSI at 16 mm/h | CSI at 32 mm/h |",
+        "|---:|---:|---:|",
+        f"| T+1h (60 min) | {fmt(lead_metric(metrics, 'val_csi_16', 60))} | "
+        f"{fmt(lead_metric(metrics, 'val_csi_32', 60))} |",
+        f"| T+2h (120 min) | {fmt(lead_metric(metrics, 'val_csi_16', 120))} | "
+        f"{fmt(lead_metric(metrics, 'val_csi_32', 120))} |",
+    ])
+    if has_rain_truth:
+        lines.extend([
+            "",
+            "### Rain-PNG Truth",
+            "",
+            "| Forecast time | CSI at 16 mm/h | CSI at 32 mm/h |",
+            "|---:|---:|---:|",
+            f"| T+1h (60 min) | {fmt(metric(metrics, 'rain_truth_val_csi_16_lead_060m'))} | "
+            f"{fmt(metric(metrics, 'rain_truth_val_csi_32_lead_060m'))} |",
+            f"| T+2h (120 min) | {fmt(metric(metrics, 'rain_truth_val_csi_16_lead_120m'))} | "
+            f"{fmt(metric(metrics, 'rain_truth_val_csi_32_lead_120m'))} |",
+        ])
+
+    lines.extend([
+        "",
+        "## 6. Lead-Time Metrics",
         "",
         "| Lead | CSI16 | CSI32 | POD16 | POD32 | FAR16 | FAR32 | Bias16 | Bias32 | Intensity ratio |",
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -199,9 +325,32 @@ def build_report(work_dir, checkpoint, params, metrics, experiment):
         lines.append(
             f"| {lead} min | " + " | ".join(fmt(value) for value in values) + " |")
 
+    if has_rain_truth:
+        lines.extend([
+            "",
+            "### Rain-PNG Truth Lead-Time Metrics",
+            "",
+            "| Lead | CSI16 | CSI32 | POD16 | POD32 | FAR16 | FAR32 |",
+            "|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for index in range(int(params.get("aft_seq_length", 20))):
+            lead = (index + 1) * lead_minutes
+            suffix = f"lead_{lead:03d}m"
+            values = [
+                metric(metrics, f"rain_truth_val_csi_16_{suffix}"),
+                metric(metrics, f"rain_truth_val_csi_32_{suffix}"),
+                metric(metrics, f"rain_truth_val_pod_16_{suffix}"),
+                metric(metrics, f"rain_truth_val_pod_32_{suffix}"),
+                metric(metrics, f"rain_truth_val_far_16_{suffix}"),
+                metric(metrics, f"rain_truth_val_far_32_{suffix}"),
+            ]
+            lines.append(
+                f"| {lead} min | "
+                + " | ".join(fmt(value) for value in values) + " |")
+
     lines.extend([
         "",
-        "## 6. All Validation Metrics",
+        "## 7. All Validation Metrics",
         "",
         "| Metric | Value |",
         "|---|---:|",
@@ -215,7 +364,7 @@ def build_report(work_dir, checkpoint, params, metrics, experiment):
 
     lines.extend([
         "",
-        "## 7. Checkpoint Inventory",
+        "## 8. Checkpoint Inventory",
         "",
         "| Checkpoint | Size (MiB) |",
         "|---|---:|",
@@ -225,7 +374,7 @@ def build_report(work_dir, checkpoint, params, metrics, experiment):
 
     lines.extend([
         "",
-        "## 8. Configuration Snapshot",
+        "## 9. Configuration Snapshot",
         "",
         "| Key | Value |",
         "|---|---|",
@@ -251,6 +400,10 @@ def main():
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--val_batch_size", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=None)
+    parser.add_argument("--compare_rain_truth", action="store_true")
+    parser.add_argument("--rain_truth_lag_minutes", type=int, default=42)
+    parser.add_argument("--rain_truth_row_shift", type=int, default=0)
+    parser.add_argument("--rain_truth_col_shift", type=int, default=1)
     options = parser.parse_args()
 
     work_dir = Path(options.work_dir).expanduser().resolve()
@@ -275,6 +428,13 @@ def main():
     params["ckpt_path"] = str(checkpoint)
     params["init_from_ckpt"] = None
     params["test"] = False
+    if options.compare_rain_truth:
+        params["evaluation_truth"] = "rain_png"
+        params["rain_truth_lag_minutes"] = options.rain_truth_lag_minutes
+        params["rain_truth_row_shift"] = options.rain_truth_row_shift
+        params["rain_truth_col_shift"] = options.rain_truth_col_shift
+    else:
+        params["evaluation_truth"] = "radar"
     params["no_display_method_info"] = True
     params["ex_name"] = options.ex_name or f"{work_dir.name}_auto_report_val"
 
@@ -289,6 +449,8 @@ def main():
     if not results:
         raise RuntimeError("Validation returned no metrics")
     metrics = results[0]
+    if options.compare_rain_truth:
+        metrics.update(evaluate_rain_truth(experiment, params))
     report = build_report(work_dir, checkpoint, params, metrics, experiment)
     report_path = Path(options.report_path) if options.report_path else (
         work_dir / "validation_report.md")
