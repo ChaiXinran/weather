@@ -113,7 +113,7 @@ venv.bak/
 *.log.json
 *.jpg
 bash
-data
+npy
 data_set
 output/
 work_dirs/
@@ -138,4 +138,5 @@ figs
 configs_test/
 api/test.py
 configs/kinetics/simvp
-configs/bair/simvp
+configs/bair/simvpdata/frames.npy
+data/*.npy
