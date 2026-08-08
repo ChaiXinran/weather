@@ -59,7 +59,9 @@ def create_parser():
                                 'EvolutionConvLSTM', 'evolution_convlstm',
                                 'EvolutionTemporalUNet', 'evolutiontemporalunet',
                                 'evolution_temporal_unet', 'DirectPhysicsHybrid',
-                                'directphysicshybrid', 'direct_physics_hybrid'],
+                                'directphysicshybrid', 'direct_physics_hybrid',
+                                'DirectPhysicsRouted', 'directphysicsrouted',
+                                'direct_physics_routed'],
                         help='Name of video prediction method to train (default: "SimVP")')
     parser.add_argument('--config_file', '-c', default=None, type=str,
                         help='Path to the default config file')

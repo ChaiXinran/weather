@@ -70,6 +70,8 @@ def load_data(dataname, batch_size, val_batch_size, num_workers, data_root, dist
             rain_truth_col_shift=kwargs.get(
                 'rain_truth_col_shift', 0),
             radar_cache_path=kwargs.get('radar_cache_path', None),
+            rain_cache_path=kwargs.get('rain_cache_path', None),
+            routing_cache_path=kwargs.get('routing_cache_path', None),
         )
         return load_data(
             batch_size, val_batch_size, data_root, num_workers, **cfg_dataloader)

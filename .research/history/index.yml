@@ -1,5 +1,11 @@
-last_updated: 2026-07-31
+last_updated: 2026-08-08
 versions:
+  - version: data-cache-20260808
+    slug: pwv_rain_uint8_cache
+    date: 2026-08-08
+    status: completed
+    record: .research/history/data_cache_20260808.md
+    summary: Lossless mmap caches for 2025 PWV and RAIN with loader integration and verification
   - version: V0.1
     slug: radar_simvp_30epoch_seed0
     date: 2026-07-30
@@ -8,4 +14,3 @@ versions:
     experiment_id: bth_simvp_gsta_formal_seed0
     artifact_root: work_dirs/bth_simvp_gsta_formal_seed0
     summary: First formal Radar-only Tiny SimVP baseline, 30 epochs, seed 0
-

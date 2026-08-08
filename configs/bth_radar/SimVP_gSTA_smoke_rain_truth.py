@@ -15,6 +15,7 @@ epoch = 10
 sample_stride = 10
 manifest_path = '.research/bth_2025_events.json'
 radar_cache_path = 'RADAR_CACHE_UINT8'
+rain_cache_path = 'RAIN_CACHE_UINT8'
 
 precip_thresholds = [0.1, 2.5, 8.0, 16.0, 32.0]
 radar_value_scale = 50.0

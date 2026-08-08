@@ -1,6 +1,6 @@
 # 项目上下文总索引
 
-> 这是新对话的首要入口。最后更新：2026-07-31。研究协议详见 `.research/detail.md`；机器可读数据与实验记录见同目录 YAML 文件。
+> 这是新对话的首要入口。最后更新：2026-08-08。研究协议详见 `.research/detail.md`；机器可读数据与实验记录见同目录 YAML 文件。
 > 历史版本从 [`.research/history/README.md`](history/README.md) 进入；已冻结的首轮 30 epoch 基线记录为
 > [`V0.1_radar_simvp_30epoch_seed0.md`](history/V0.1_radar_simvp_30epoch_seed0.md)。
 
@@ -18,6 +18,7 @@
 - 事件判据：20 dBZ、湿区比例 0.01、最大干间隔 3 小时、前后扩展 30 分钟。正式样本 stride=1。
 - 2025 原始数据：`/mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S`。
 - Radar 缓存：上述目录下 `RADAR_CACHE_UINT8/frames.npy + manifest.json`，形状 `[32457,66,70]`、uint8、约 144 MiB。它是无损帧缓存，使用 mmap、每 worker 延迟打开；归一化仍在加载时执行。100 个 10→20 样本的 I/O 从 11.727 s 降至 0.069 s（168.99×，不代表端到端训练加速）。
+- PWV/RAIN 缓存（2026-08-08）：`PWV_CACHE_UINT8` 为 `[29516,66,70]`，`RAIN_CACHE_UINT8` 为 `[29511,66,70]`，均保存无损原始 uint8 并使用 mmap。各 23 个抽查帧逐像素一致；600 帧 float32 归一化微基准分别加速 6.49× 和 8.60×。RAIN loader 已支持 `rain_cache_path`；PWV 后续 loader 可复用 `BTHPNGCache`。详见 `docs/bth_multisource_cache.md`。
 - 正式评估将未来 Radar 用冻结的 Marshall–Palmer `Z=200R^1.6` 转成雨强。Rain PNG 只用于 Z-R 选择和诊断；其量化且封顶 35 mm/h，并非独立站点真值。Rain 对齐固定为 +42 分钟、行 0、列 +1。
 
 ## 3. 环境与本机调用

@@ -169,7 +169,8 @@ class BaseExperiment(object):
                            'evolutionconvlstm', 'evolution_convlstm',
                            'evolutiontemporalunet',
                            'evolution_temporal_unet', 'directphysicshybrid',
-                           'direct_physics_hybrid']:
+                           'direct_physics_hybrid', 'directphysicsrouted',
+                           'direct_physics_routed']:
             input_dummy = torch.ones(1, args.pre_seq_length, C, H, W).to(device)
         elif args.method == 'phydnet':
             _tmp_input1 = torch.ones(1, args.pre_seq_length, C, H, W).to(device)

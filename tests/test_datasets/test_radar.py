@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 
 from openstl.datasets.dataloader_radar import BTHRadarDataset
+from openstl.datasets.png_cache import CACHE_FORMAT
 
 
 def _write_sequence(root, length=31, missing=None):
@@ -76,3 +77,38 @@ def test_radar_uint8_cache_matches_png_decode(tmp_path):
     assert np.array_equal(cache_inputs.numpy(), png_inputs.numpy())
     assert np.array_equal(cache_targets.numpy(), png_targets.numpy())
     assert '#0' in cached_dataset.sample_metadata(0)['files'][0]
+
+
+def test_rain_uint8_cache_matches_png_truth(tmp_path):
+    radar_root = tmp_path / 'RADAR_2025_S'
+    rain_root = tmp_path / 'RAIN_2025_S'
+    _write_sequence(radar_root)
+    _write_sequence(rain_root)
+
+    png_dataset = BTHRadarDataset(
+        tmp_path, '2025-05-01', '2025-05-01',
+        pre_seq_length=10, aft_seq_length=20,
+        evaluation_truth='rain_png')
+    timestamps = sorted(png_dataset.rain_frames)
+    cache_dir = tmp_path / 'RAIN_CACHE_UINT8'
+    cache_dir.mkdir()
+    frames = np.stack([
+        np.asarray(Image.open(png_dataset.rain_frames[t]).convert('L'))
+        for t in timestamps]).astype(np.uint8)
+    np.save(cache_dir / 'frames.npy', frames)
+    (cache_dir / 'manifest.json').write_text(json.dumps({
+        'format': CACHE_FORMAT,
+        'variable': 'rain',
+        'dtype': 'uint8',
+        'shape': list(frames.shape),
+        'timestamps': [timestamp.isoformat() for timestamp in timestamps],
+    }), encoding='utf-8')
+
+    cached_dataset = BTHRadarDataset(
+        tmp_path, '2025-05-01', '2025-05-01',
+        pre_seq_length=10, aft_seq_length=20,
+        evaluation_truth='rain_png',
+        rain_cache_path='RAIN_CACHE_UINT8')
+
+    assert np.array_equal(
+        cached_dataset.rain_targets([0]), png_dataset.rain_targets([0]))

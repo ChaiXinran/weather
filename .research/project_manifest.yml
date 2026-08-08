@@ -6,7 +6,7 @@ research_question: >-
   nowcasting—especially heavy-rain initiation, intensification, persistence,
   and displacement—without inflating weak-rain area?
 current_stage: experiments
-last_updated: 2026-07-31
+last_updated: 2026-08-08
 repository:
   windows_path: D:\_Search\AIforScience\Rewritten\origin\OpenSTL
   wsl_path: /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL
@@ -28,9 +28,12 @@ status_summary:
     - Radar-only SimVP baseline and five-layer precipitation evaluation
     - Frozen Marshall-Palmer Z-R conversion and Rain alignment protocol
     - One formal 30-epoch seed-0 baseline run and best/last checkpoint reports
+    - ConvLSTM R2d strong baseline and DirectPhysicsHybrid V2 validation reports
+    - Lossless uint8 Radar, PWV, and RAIN mmap caches
+    - Automatic per-workdir and multi-workdir validation reporting tools
   in_progress:
-    - Validation precipitation score and dual-checkpoint R1 experiment
+    - V3a error-aware routed preserve-motion-decay design and implementation
   planned:
-    - Strong-rain-aware loss
-    - Multi-seed Radar-only baseline
+    - V3a routing-label cache and oracle/learned attribution
+    - Staged motion-decay expert, router, and joint training
     - PWV and DEM fusion stages

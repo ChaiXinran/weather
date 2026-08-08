@@ -24,6 +24,8 @@ from .temporal_unet_modules import (BottleneckConvLSTMFusion,
                                     TemporalFeaturePyramid,
                                     TemporalWeightedFusion,
                                     UNetFactorizedSourceHead, UNetMotionHead)
+from .v3a_routing import (build_packed_routing_target,
+                          decode_packed_routing_target)
 
 __all__ = [
     'ConvLSTMCell', 'EvolutionOperator', 'backward_warp', 'warp_field',
@@ -40,7 +42,8 @@ __all__ = [
     'UpSample', 'DownSample', 'STconvert', 'BottleneckConvLSTMFusion',
     'DWResidualBlock', 'FPNDecoder',
     'SharedFrameEncoder', 'TemporalFeaturePyramid',
-    'TemporalWeightedFusion', 'UNetFactorizedSourceHead', 'UNetMotionHead'
+    'TemporalWeightedFusion', 'UNetFactorizedSourceHead', 'UNetMotionHead',
+    'build_packed_routing_target', 'decode_packed_routing_target'
     
     
 ]

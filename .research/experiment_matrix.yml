@@ -104,6 +104,28 @@ experiments:
       last_completed_epoch: 2
     output: work_dirs/bth_simvp_gsta_r1_5ep_seed0
     caveat: No completed test evaluation or final conclusion; do not treat as a finished result
+  - id: bth_direct_physics_hybrid_v2_clean_manifest_10ep_seed0
+    status: completed
+    seed: 0
+    epochs: 10
+    purpose: Frozen ConvLSTM prior plus lightweight U-Net motion/source correction
+    config: configs/bth_radar/DirectPhysicsHybrid_r2d_no_deep_convlstm.py
+    parameters: {total: 4809641, trainable: 1064617, frozen: 3745024}
+    validation:
+      weighted_csi_score: 0.9371937066
+      lead_60: {csi16: 0.2137737435, csi32: 0.1300606899, far16: 0.6704812529, far32: 0.8260318548}
+      lead_120: {csi16: 0.1070555596, csi32: 0.0498034736, far16: 0.8466312057, far32: 0.9372553169}
+    attribution: Motion supplies nearly all measurable gain; source-only is nearly neutral
+    report: .research/mixed/satge1.md
+    caveat: Validation-only radar-derived truth; do not describe as an independent Test result
+  - id: bth_direct_physics_routed_v3a
+    status: implemented_not_trained
+    purpose: Effect-first preserve-motion-decay candidates with object-supervised soft routing
+    baseline: bth_direct_physics_hybrid_v2_clean_manifest_10ep_seed0
+    stages: [routing_cache, expert_pretrain, router_pretrain, joint_training]
+    protocol: .research/mixed/v3a_routing_protocol.md
+    implementation_plan: .research/mixed/v3a_implementation_plan.md
+    scope: Seed 0 and Validation only until the mechanism shows useful behavior
 historical_partial_runs:
   - bth_simvp_gsta_10ep
   - smoke_10ep
@@ -111,4 +133,3 @@ historical_partial_runs:
 checkpoints_current_policy:
   files: [best_val_loss.ckpt, best_val_csi.ckpt, last.ckpt]
   explicit_test_loading: The requested ckpt_path is loaded explicitly
-

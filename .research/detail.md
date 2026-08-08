@@ -1441,3 +1441,311 @@ python tools/cache_bth_radar.py \
 > [`.research/context_index.md`](context_index.md)。机器可读的项目、数据和实验状态分别在
 > `project_manifest.yml`、`data_dictionary.yml`、`experiment_matrix.yml`；冻结决策和待解决问题分别在
 > `decisions.md`、`open_questions.md`。本文件继续作为研究方案和评估协议的详细正文。
+
+---
+
+## 18. 2026-08-08 项目续接快照（优先于前文过时状态）
+
+### 18.1 当前最好工程基线
+
+当前同一 Validation 协议下效果最好的已报告模型是：
+
+```text
+bth_direct_physics_hybrid_v2_clean_manifest_10ep_seed0
+config: configs/bth_radar/DirectPhysicsHybrid_r2d_no_deep_convlstm.py
+report: .research/mixed/satge1.md
+baseline summary: .research/baselines/v2/summary.md
+weighted validation CSI score: 0.937194
+parameters: 4,809,641 total / 1,064,617 trainable / 3,745,024 frozen
+```
+
+该模型由冻结的完整 ConvLSTM direct prior 和轻量 U-Net motion/source 修正组成。
+Branch attribution 表明增益主要来自 motion；source-only 贡献接近零。+60/+120
+分钟关键参考值：
+
+| Lead | CSI16 | CSI32 | FAR16 | FAR32 |
+|---:|---:|---:|---:|---:|
+| +60 min | 0.213774 | 0.130061 | 0.670481 | 0.826032 |
+| +120 min | 0.107056 | 0.049803 | 0.846631 | 0.937255 |
+
+`0.937194` 是当前 radar-derived Validation 工程参考，不是论文最终真值结论。
+目前开发策略改为效果优先：少做形式化验证，多尝试新机制；机制有效前只跑
+seed 0/Validation，不默认跑 Test、多 seed 或 bootstrap。
+
+### 18.2 当前主线 V3a
+
+下一模型固定为 error-aware routed `preserve + motion + decay`，暂不包含
+growth。详细协议和改造计划：
+
+- `.research/mixed/v3a_routing_protocol.md`
+- `.research/mixed/v3a_implementation_plan.md`
+- `.research/design_brief.md`
+
+核心形式：
+
+\[
+\hat R=p^pD+p^m\mathcal W(D,\Delta U)+p^dD(1-Q^{decay}).
+\]
+
+16 mm/h 连通对象定义 storm footprint，32 mm/h core 作内部细化；首版搜索
+半径 2 grid（约 20 km），16/32 路由软标签权重为 1.0/1.5，模糊情况 ignore。
+
+### 18.3 本地 WSL 环境与命令
+
+```text
+Windows repo: D:\_Search\AIforScience\Rewritten\origin\OpenSTL
+WSL repo:     /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL
+Python:       /home/ranye/miniconda3/envs/OpenSTL/bin/python
+Data root:    /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S
+GPU:          RTX 4060 Laptop 8 GB
+```
+
+训练模板：
+
+```bash
+cd /mnt/d/_Search/AIforScience/Rewritten/origin/OpenSTL
+PYTHONPATH=. /home/ranye/miniconda3/envs/OpenSTL/bin/python tools/train.py \
+  --dataname bth_radar \
+  --method METHOD_NAME \
+  --config_file configs/bth_radar/CONFIG.py \
+  --data_root /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S \
+  --ex_name EXPERIMENT_NAME \
+  --epoch EPOCHS \
+  --batch_size 4 \
+  --val_batch_size 4 \
+  --seed 0 \
+  --deterministic \
+  --no_display_method_info \
+  --skip_test_after_train
+```
+
+### 18.4 服务器环境与命令
+
+服务器仓库与工作目录通常为：
+
+```text
+repo/work root: /root/weather
+data root:      /root/weather/data（在仓库内可写作 data）
+work dirs:      /root/weather/work_dirs
+```
+
+服务器 `data/` 下应直接包含数据目录和缓存，例如：
+
+```text
+data/
+├── RADAR_CACHE_UINT8/
+├── PWV_CACHE_UINT8/
+├── RAIN_CACHE_UINT8/
+├── RADAR_2025_S/       # 若保留原 PNG
+├── PWV_2025_S/
+└── RAIN_2025_S/
+```
+
+在已激活 OpenSTL Python/Conda 环境后使用：
+
+```bash
+cd /root/weather
+export PYTHONPATH=.
+python tools/train.py \
+  --dataname bth_radar \
+  --method METHOD_NAME \
+  --config_file configs/bth_radar/CONFIG.py \
+  --data_root data \
+  --ex_name EXPERIMENT_NAME \
+  --epoch EPOCHS \
+  --batch_size 4 \
+  --val_batch_size 4 \
+  --seed 0 \
+  --deterministic \
+  --no_display_method_info \
+  --skip_test_after_train
+```
+
+服务器 Python 可执行文件以实际激活环境为准；不要把本地
+`/home/ranye/miniconda3/...` 路径复制到服务器。
+
+### 18.5 缓存约定
+
+本地三个 lossless mmap 缓存位于本地 `DATA_2025_S` 下；服务器位于 `data/`
+下。配置使用相对路径：
+
+```python
+radar_cache_path = 'RADAR_CACHE_UINT8'
+pwv_cache_path = 'PWV_CACHE_UINT8'       # PWV loader 接入后使用
+rain_cache_path = 'RAIN_CACHE_UINT8'
+```
+
+PWV/RAIN 缓存构建与验证见 `docs/bth_multisource_cache.md`：
+
+```bash
+python tools/cache_bth_png.py --variable pwv --data-root DATA_ROOT
+python tools/cache_bth_png.py --variable rain --data-root DATA_ROOT
+python tools/verify_bth_png_cache.py --cache DATA_ROOT/PWV_CACHE_UINT8
+python tools/verify_bth_png_cache.py --cache DATA_ROOT/RAIN_CACHE_UINT8
+```
+
+缓存只改变 I/O，不改变样本、时间戳、归一化或评价协议。
+
+### 18.6 Validation 与自动报告命令
+
+显式 checkpoint Validation：
+
+```bash
+PYTHONPATH=. python tools/validate.py \
+  --dataname bth_radar \
+  --method METHOD_NAME \
+  --config_file configs/bth_radar/CONFIG.py \
+  --data_root DATA_ROOT \
+  --ckpt_path work_dirs/EXPERIMENT/checkpoints/best_val_csi.ckpt \
+  --val_batch_size 4 \
+  --no_display_method_info
+```
+
+单个 work directory 自动生成完整 Validation 报告：
+
+```bash
+PYTHONPATH=. python tools/report_bth_workdir.py \
+  --work_dir work_dirs/EXPERIMENT \
+  --data_root DATA_ROOT \
+  --val_batch_size 4
+```
+
+默认输出 `work_dirs/EXPERIMENT/validation_report.md`，自动读取
+`model_param.json` 和 `best_val_csi.ckpt`。这是 Validation-only，不使用 Test。
+
+批量扫描并生成比较表：
+
+```bash
+PYTHONPATH=. python tools/report_bth_all_workdirs.py \
+  --work_root work_dirs \
+  --data_root DATA_ROOT \
+  --output_dir work_dirs/evaluation_summary \
+  --batch_size 4 \
+  --val_batch_size 4 \
+  --reuse_reports
+```
+
+输出 `bth_model_comparison.csv/.md`、失败清单和扫描 inventory。
+
+当前 DirectPhysicsHybrid 分支 attribution：
+
+```bash
+PYTHONPATH=. python tools/evaluate_direct_physics_attribution.py \
+  --work_dir work_dirs/EXPERIMENT \
+  --data_root DATA_ROOT \
+  --val_batch_size 4
+```
+
+输出 `branch_attribution.json` 和 `branch_attribution.md`。V3a 后续应新增
+`preserve/motion/decay/oracle-routed/learned-routed` attribution 工具。
+
+本地命令将 `python` 替换为
+`/home/ranye/miniconda3/envs/OpenSTL/bin/python`，`DATA_ROOT` 替换为本地绝对
+路径；服务器保持已激活环境的 `python`，`DATA_ROOT` 使用 `data`。
+
+### 18.7 后续 AI 的读取顺序
+
+仓库根目录 `AGENTS.md` 是最短入口。任何新 AI/会话在修改数据、训练配置、
+模型或报告工具前，应按顺序读取：
+
+1. `.research/detail.md` 本节；
+2. `.research/context_index.md`；
+3. `.research/project_manifest.yml`、`data_dictionary.yml`；
+4. 与当前模型相关的 `.research/mixed/` 方案和最新报告；
+5. 仅在需要时读取历史实验，不要重新扫描整个 `work_dirs/`。
+
+### 18.8 V3a 已实现入口与运行顺序（2026-08-08）
+
+V3a 当前代码入口：
+
+```text
+model:   openstl/models/direct_physics_routed_model.py
+method:  openstl/methods/direct_physics_routed.py
+routing: openstl/modules/v3a_routing.py
+cache:   openstl/datasets/v3a_routing_cache.py
+builder: tools/build_bth_v3a_routing_cache.py
+audit:   tools/audit_v3a_init.py
+attrib:  tools/evaluate_v3a_attribution.py
+```
+
+第一步，一次性生成 train/val routing cache：
+
+```bash
+PYTHONPATH=. python tools/build_bth_v3a_routing_cache.py \
+  --config_file configs/bth_radar/DirectPhysicsRouted_v3a.py \
+  --data_root DATA_ROOT \
+  --output DATA_ROOT/V3A_ROUTING_CACHE \
+  --splits train val \
+  --batch_size 4 \
+  --num_workers 4
+```
+
+服务器用 `DATA_ROOT=data`；本地使用本节前述绝对路径，并把 `python` 替换为
+本地 OpenSTL Python。标签保存为 packed uint8，不保存庞大的 float soft mask；
+训练读取时再按 `w16=1.0,w32=1.5` 解码。
+
+第二步，专家预训练：
+
+```bash
+PYTHONPATH=. python tools/train.py \
+  --dataname bth_radar \
+  --method DirectPhysicsRouted \
+  --config_file configs/bth_radar/DirectPhysicsRouted_v3a.py \
+  --data_root DATA_ROOT \
+  --ex_name bth_v3a_expert_seed0 \
+  --epoch 3 --batch_size 4 --val_batch_size 4 \
+  --seed 0 --deterministic --no_display_method_info \
+  --skip_test_after_train
+```
+
+本地首次运行可将配置换成
+`configs/bth_radar/DirectPhysicsRouted_v3a_local.py`，它使用本地已有 V2
+checkpoint；服务器主配置指向服务器的 V2 clean-manifest checkpoint。
+
+第三步，router 预训练：
+
+```bash
+PYTHONPATH=. python tools/train.py \
+  --dataname bth_radar \
+  --method DirectPhysicsRouted \
+  --config_file configs/bth_radar/DirectPhysicsRouted_v3a_router.py \
+  --data_root DATA_ROOT \
+  --init_from_ckpt work_dirs/bth_v3a_expert_seed0/checkpoints/best_val_csi.ckpt \
+  --ex_name bth_v3a_router_seed0 \
+  --epoch 3 --batch_size 4 --val_batch_size 4 \
+  --seed 0 --deterministic --no_display_method_info \
+  --skip_test_after_train
+```
+
+第四步，联合强修正：
+
+```bash
+PYTHONPATH=. python tools/train.py \
+  --dataname bth_radar \
+  --method DirectPhysicsRouted \
+  --config_file configs/bth_radar/DirectPhysicsRouted_v3a_joint.py \
+  --data_root DATA_ROOT \
+  --init_from_ckpt work_dirs/bth_v3a_router_seed0/checkpoints/best_val_csi.ckpt \
+  --ex_name bth_v3a_joint_seed0 \
+  --epoch 8 --batch_size 4 --val_batch_size 4 \
+  --seed 0 --deterministic --no_display_method_info \
+  --skip_test_after_train
+```
+
+V3a attribution：
+
+```bash
+PYTHONPATH=. python tools/evaluate_v3a_attribution.py \
+  --work_dir work_dirs/bth_v3a_joint_seed0 \
+  --data_root DATA_ROOT \
+  --val_batch_size 4
+```
+
+训练进度条现在额外显示：
+
+```text
+val_csi16_t60  val_csi32_t60
+val_csi16_t120 val_csi32_t120
+```
+
+完整长名称仍保留在 Lightning metrics/checkpoint 中。

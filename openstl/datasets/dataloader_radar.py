@@ -10,6 +10,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 from openstl.datasets.utils import create_loader
+from openstl.datasets.png_cache import BTHPNGCache
+from openstl.datasets.v3a_routing_cache import V3ARoutingCache
 
 
 TIMESTAMP_FORMAT = '%Y-%m-%d-%H-%M-%S'
@@ -55,9 +57,11 @@ class BTHRadarDataset(Dataset):
                  split=None,
                  evaluation_truth='radar',
                  radar_cache_path=None,
+                 rain_cache_path=None,
                  rain_truth_lag_minutes=0,
                  rain_truth_row_shift=0,
-                 rain_truth_col_shift=0):
+                 rain_truth_col_shift=0,
+                 routing_cache_path=None):
         self.data_root = _resolve_radar_root(data_root)
         self.start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
         self.end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
@@ -89,16 +93,28 @@ class BTHRadarDataset(Dataset):
                 else Path(data_root) / cache_path)
         self._radar_cache = None
         self.rain_frames = None
+        self.rain_cache = None
         if evaluation_truth == 'rain_png':
-            rain_root = Path(data_root) / 'RAIN_2025_S'
-            if not rain_root.is_dir():
-                raise FileNotFoundError(f'Rain root not found: {rain_root}')
-            self.rain_frames = {
-                _parse_timestamp(path): path
-                for path in rain_root.rglob('*.png')
-                if self.start_date <= _parse_timestamp(path).date()
-                <= self.end_date
-            }
+            if rain_cache_path:
+                cache_path = Path(rain_cache_path)
+                cache_path = (cache_path if cache_path.is_absolute()
+                              else Path(data_root) / cache_path)
+                self.rain_cache = BTHPNGCache(
+                    cache_path, 'rain', self.expected_size)
+                self.rain_frames = {
+                    timestamp: index
+                    for timestamp, index in self.rain_cache.frames.items()
+                    if self.start_date <= timestamp.date() <= self.end_date}
+            else:
+                rain_root = Path(data_root) / 'RAIN_2025_S'
+                if not rain_root.is_dir():
+                    raise FileNotFoundError(f'Rain root not found: {rain_root}')
+                self.rain_frames = {
+                    _parse_timestamp(path): path
+                    for path in rain_root.rglob('*.png')
+                    if self.start_date <= _parse_timestamp(path).date()
+                    <= self.end_date
+                }
         elif evaluation_truth != 'radar':
             raise ValueError('evaluation_truth must be radar or rain_png')
 
@@ -117,6 +133,16 @@ class BTHRadarDataset(Dataset):
             raise RuntimeError(
                 f'No continuous {self.total_length}-frame sequences found from '
                 f'{start_date} through {end_date} in {self.data_root}')
+        self.routing_cache = None
+        if routing_cache_path and split in {'train', 'val'}:
+            cache_path = Path(routing_cache_path)
+            cache_path = (cache_path if cache_path.is_absolute()
+                          else Path(data_root) / cache_path)
+            sample_keys = [sample[0].isoformat() for sample in self.samples]
+            self.routing_cache = V3ARoutingCache(
+                cache_path, split, sample_keys,
+                (self.aft_seq_length, self.expected_size[1],
+                 self.expected_size[0]))
 
     def _discover_frames(self):
         frames = {}
@@ -224,14 +250,23 @@ class BTHRadarDataset(Dataset):
         state = self.__dict__.copy()
         # Every DataLoader worker opens its own read-only mmap handle lazily.
         state['_radar_cache'] = None
+        if state.get('rain_cache') is not None:
+            state['rain_cache']._array = None
+        if state.get('routing_cache') is not None:
+            state['routing_cache']._array = None
         return state
 
     def __getitem__(self, index):
         timestamps = self.samples[index]
         sequence = torch.stack(
             [self._read_frame(timestamp) for timestamp in timestamps], dim=0)
-        return (sequence[:self.pre_seq_length],
-                sequence[self.pre_seq_length:])
+        inputs = sequence[:self.pre_seq_length]
+        targets = sequence[self.pre_seq_length:]
+        if self.routing_cache is None:
+            return inputs, targets
+        routing = torch.from_numpy(
+            self.routing_cache.read(index).astype(np.int64, copy=True))
+        return inputs, targets, routing
 
     def sample_metadata(self, index):
         """Return traceability metadata without reading image pixels."""
@@ -266,11 +301,15 @@ class BTHRadarDataset(Dataset):
                 for timestamp in self.samples[index][self.pre_seq_length:]]
             frames = []
             for timestamp in timestamps:
-                path = self.rain_frames.get(timestamp)
-                if path is None:
+                source = self.rain_frames.get(timestamp)
+                if source is None:
                     raise FileNotFoundError(f'Missing Rain frame at {timestamp}')
-                with Image.open(path) as image:
-                    pixels = np.asarray(image.convert('L'), dtype=np.float32)
+                if self.rain_cache is not None:
+                    pixels = self.rain_cache.read(timestamp)
+                else:
+                    with Image.open(source) as image:
+                        pixels = np.asarray(
+                            image.convert('L'), dtype=np.float32)
                 decoded = (255.0 - pixels) / 255.0
                 aligned = np.full(decoded.shape, np.nan, dtype=np.float32)
                 rows, cols = decoded.shape
@@ -301,9 +340,11 @@ def load_data(batch_size,
               manifest_path=None,
               evaluation_truth='radar',
               radar_cache_path=None,
+              rain_cache_path=None,
               rain_truth_lag_minutes=0,
               rain_truth_row_shift=0,
               rain_truth_col_shift=0,
+              routing_cache_path=None,
               **kwargs):
     """Build loaders using a provisional, non-overlapping chronological split.
 
@@ -318,9 +359,11 @@ def load_data(batch_size,
         stride=sample_stride,
         evaluation_truth=evaluation_truth,
         radar_cache_path=radar_cache_path,
+        rain_cache_path=rain_cache_path,
         rain_truth_lag_minutes=rain_truth_lag_minutes,
         rain_truth_row_shift=rain_truth_row_shift,
         rain_truth_col_shift=rain_truth_col_shift,
+        routing_cache_path=routing_cache_path,
     )
     if manifest_path:
         full_range = dict(start_date='2025-05-01', end_date='2025-08-31')

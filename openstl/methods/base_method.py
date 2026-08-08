@@ -239,10 +239,17 @@ class Base_method(l.LightningModule):
                 hits, false_alarms, misses, pred_area, true_area = \
                     values[offset:offset + 5]
                 label = f'{float(threshold):g}'
+                lead_csi = self._safe_torch_ratio(
+                    hits, hits + false_alarms + misses)
                 self.log(
                     f'val_csi_{label}_lead_{lead_minutes:03d}m',
-                    self._safe_torch_ratio(
-                        hits, hits + false_alarms + misses))
+                    lead_csi)
+                if lead_minutes in (60, 120) and float(threshold) in (16.0, 32.0):
+                    # Short aliases are deliberately progress-bar metrics so
+                    # training logs expose the two decision leads every epoch.
+                    self.log(
+                        f'val_csi{label}_t{lead_minutes}', lead_csi,
+                        prog_bar=True)
                 self.log(
                     f'val_far_{label}_lead_{lead_minutes:03d}m',
                     self._safe_torch_ratio(

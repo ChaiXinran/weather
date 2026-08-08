@@ -58,7 +58,8 @@ def evaluate_rain_truth(experiment, params):
     method.eval()
     sample_offset = 0
     with torch.inference_mode():
-        for batch_x, batch_y in loader:
+        for batch in loader:
+            batch_x, batch_y = batch[:2]
             batch_size = batch_x.shape[0]
             indices = range(sample_offset, sample_offset + batch_size)
             rain_true = dataset.rain_targets(indices) * 35.0

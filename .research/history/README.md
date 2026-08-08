@@ -14,7 +14,7 @@
 
 | 版本 | 日期 | 状态 | 内容 |
 |---|---|---|---|
+| [data-cache-20260808](data_cache_20260808.md) | 2026-08-08 | completed | PWV/RAIN 无损 uint8 mmap 缓存与读取接入 |
 | [V0.1](V0.1_radar_simvp_30epoch_seed0.md) | 2026-07-30 | completed | 首轮正式 Radar-only Tiny SimVP，30 epoch，seed 0 |
 
 未来每次冻结一次模型、数据协议、损失函数或评估协议，都应新增版本文件，不覆盖旧记录；同时更新 `index.yml`、`.research/experiment_matrix.yml` 和 `.research/run_log.md`。
-

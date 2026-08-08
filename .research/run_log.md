@@ -1,5 +1,33 @@
 # Research workspace run log
 
+## 2026-08-08 - V3a routed motion-decay implementation
+
+- Added an independent `DirectPhysicsRouted` model/method without modifying the reproducible V2 implementation.
+- Added compact uint8 object-routing labels, a sample-aligned mmap cache, and a one-pass train/validation cache builder.
+- V3a now uses preserve, motion, and decay candidates with a learned spatial softmax router; U-Net sees previous/current/next direct priors, temporal differences, spatial gradients, and lead embeddings.
+- Added expert, router, and joint-stage configs plus compatible V2 correction-weight loading and complete V3a checkpoint continuation.
+- Added V3a candidate/oracle/learned attribution and progress-bar metrics for CSI16/32 at +60 and +120 minutes.
+- WSL regression tests passed 9/9; full-size checkpoint audit loaded 17 direct tensors and 126 compatible V2 tensors, with output `[1,20,1,66,70]` and 4,848,746 total parameters.
+- No routing cache, training run, or Test evaluation was launched in this implementation turn.
+
+## 2026-08-08 - V3a plan and dual-environment handoff
+
+- Recorded DirectPhysicsHybrid V2 clean-manifest as the current Validation engineering baseline (`0.937194`) and preserved its +60/+120 CSI/FAR reference values.
+- Locked V3a as an effect-first routed preserve-motion-decay model; growth is deferred.
+- Added the detailed routing protocol and staged implementation plan under `.research/mixed/`.
+- Updated `.research/detail.md` with local WSL and `/root/weather` server command templates, cache layouts, Validation/report commands, and current continuation state.
+- Added root `AGENTS.md` as a short navigation file that directs future AI sessions to `.research/detail.md` rather than rescanning the repository.
+- Refreshed the project manifest, experiment matrix, decisions, and open questions without running training or Test evaluation.
+
+## 2026-08-08 - PWV and RAIN lossless caches
+
+- Built 2025 PWV and RAIN lossless uint8 NPY caches with timestamp manifests and lazy per-worker mmap access.
+- Added generic cache build/verification tools and a reusable `BTHPNGCache` reader; integrated `rain_cache_path` with PNG fallback into the Radar dataset.
+- PWV has 29,516 frames and RAIN 29,511 frames. Twenty-three exact checks per variable passed.
+- Realistic 600-frame read-plus-float32-normalization microbenchmarks were 6.49x faster for PWV and 8.60x faster for RAIN.
+- WSL OpenSTL dataset regression tests passed: 4/4.
+- Detailed record: `.research/history/data_cache_20260808.md`; usage: `docs/bth_multisource_cache.md`.
+
 ## 2026-08-01 - R4-a and R4-b2 spatial motion gate
 
 - R4-a history-only Farneback median3 improved CSI16 from zero-flow .62011 to

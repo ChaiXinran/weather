@@ -1,4 +1,4 @@
-last_updated: 2026-07-31
+last_updated: 2026-08-08
 spatial_domain:
   name: Beijing-Tianjin-Hebei
   grid_shape: [66, 70]
@@ -22,9 +22,21 @@ radar:
   training_normalization: (255 - pixel) / 255
   value_range_normalized: [0, 1]
   truth_for_formal_evaluation: Future Radar converted to rain rate by the frozen Z-R relation
+pwv:
+  source_format: inverse-grayscale PNG
+  frames_2025_unique: 29516
+  decoded_mm: (255 - pixel) * 80 / 255
+  training_normalization: (255 - pixel) / 255
+  cache_path_wsl: /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S/PWV_CACHE_UINT8
+  cache_shape: [29516, 66, 70]
+  cache_dtype: uint8
 rain:
   source_format: inverse-grayscale PNG
   probable_decode_mm_per_hour: (255 - pixel) * 35 / 255
+  frames_2025_unique: 29511
+  cache_path_wsl: /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S/RAIN_CACHE_UINT8
+  cache_shape: [29511, 66, 70]
+  cache_dtype: uint8
   limitations:
     - Quantized and capped at 35 mm/h
     - Not independent rain-gauge validation
@@ -90,5 +102,15 @@ cache:
     speedup: 168.99
     scope: I/O microbenchmark, not end-to-end training speed
   builder: tools/cache_bth_radar.py
+auxiliary_caches:
+  format: bth-png-uint8-npy-v1
+  builder: tools/cache_bth_png.py
+  verifier: tools/verify_bth_png_cache.py
+  storage: Lossless raw inverse-grayscale uint8 pixels
+  files: [frames.npy, manifest.json]
+  access: NumPy mmap, opened lazily per data-loader worker
+  verification_2026_08_08:
+    pwv: {exact_checks: 23, benchmark_frames: 600, speedup: 6.49}
+    rain: {exact_checks: 23, benchmark_frames: 600, speedup: 8.60}
+    benchmark_scope: PNG/cache read plus identical float32 normalization; not end-to-end training
 raw_2025_wsl_root: /mnt/d/_Search/AIforScience/Rewritten/capsule-3935105/data/DATA_2025_S
-
